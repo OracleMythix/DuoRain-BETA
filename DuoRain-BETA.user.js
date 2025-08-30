@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         DuoRain BETA
 // @namespace    http://tampermonkey.net/
-// @version      1.3
-// @description  Automates Duolingo XP, Gems, and Streak farming with an enhanced UI.
+// @version      2.0
+// @description  Duolingo XP, Gems, and Streak farming.
 // @author       OracleMythix
 // @match        https://*.duolingo.com/*
 // @grant        GM_xmlhttpRequest
@@ -43,7 +43,7 @@
                     <div class="duorain-shiny-effect"></div>
                     <div class="duorain-header">
                         <span class="duorain-title">DuoRain</span>
-                        <span class="duorain-version">v1.3</span>
+                        <span class="duorain-version">v2.0</span>
                     </div>
                     <div id="duorain-status" class="duorain-status-idle">Ready.</div>
                     <div class="duorain-tabs">
@@ -53,9 +53,7 @@
                     </div>
                     <div id="duorain-content">
                         <div id="tab-xp" class="duorain-tab-content active">
-                            <p class="duorain-label">Story Slug</p>
-                            <input type="text" id="story-slug-input" class="duorain-input" value="fr-en-le-passeport">
-                            <p class="duorain-desc">Find in a story's URL. Must match your course.</p>
+                            <p class="duorain-desc">This farms XP by rapidly completing a French story. Ensure you are enrolled in the 'French for English speakers' course.</p>
                             <p class="duorain-label">Number of Loops</p>
                             <input type="number" id="xp-loops-input" class="duorain-input" placeholder="e.g., 100" min="1">
                             <button id="start-xp-farm" class="duorain-button-start">Start Farming XP</button>
@@ -80,17 +78,29 @@
 
         const uiStyle = `
             :root {
-                --duorain-blue: #007AFF;
-                --duorain-green: #34C759;
-                --duorain-yellow: #FFCC00;
-                --duorain-red: #FF3B30;
-                --duorain-text-primary: #3c3c3c;
-                --duorain-text-secondary: #8e8e93;
-                --duorain-bg-light: rgba(255, 255, 255, 0.65);
-                --duorain-border-color: rgba(255, 255, 255, 0.4);
+                --duo-color-blue: #1cb0f6;
+                --duo-color-green: #58a700;
+                --duo-color-green-dark: #4a8d00;
+                --duo-color-yellow: #ffc800;
+                --duo-color-red: #ff4b4b;
+
+                --duo-bg: var(--color-snow-rgb, 255, 255, 255);
+                --duo-text-primary: var(--color-gray-800, #4c4c4c);
+                --duo-text-secondary: var(--color-gray-500, #afafaf);
+                --duo-border: var(--color-gray-200, #e5e5e5);
+                --duo-border-glow: rgba(255, 255, 255, 0.4);
             }
+
+            body.dark {
+                --duo-bg: var(--color-gray-900-rgb, 25, 34, 49);
+                --duo-text-primary: var(--color-snow, #ffffff);
+                --duo-text-secondary: var(--color-gray-400, #9da4b0);
+                --duo-border: var(--color-gray-700, #3c4c5f);
+                --duo-border-glow: rgba(255, 255, 255, 0.1);
+            }
+
             #duorain-toggle-button {
-                position: fixed; bottom: 20px; right: 20px; background-image: linear-gradient(45deg, #007AFF, #5AC8FA);
+                position: fixed; bottom: 20px; right: 20px; background-image: linear-gradient(45deg, var(--duo-color-blue), #5AC8FA);
                 color: white; padding: 12px 18px; border-radius: 50px; cursor: pointer;
                 font-family: "Duolingo Rounded", "Arial", sans-serif; font-weight: bold;
                 box-shadow: 0 5px 15px rgba(0, 122, 255, 0.3); z-index: 10000;
@@ -103,43 +113,47 @@
             }
             #duorain-main-container.duorain-hidden { opacity: 0; transform: scale(0.95) translateY(20px); pointer-events: none; }
             .duorain-main-box {
-                background: var(--duorain-bg-light);
-                backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+                background: rgba(var(--duo-bg), 0.7);
+                backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
                 border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); padding: 20px;
-                border: 1.5px solid var(--duorain-border-color);
+                border: 1px solid var(--duo-border-glow);
                 position: relative; overflow: hidden;
             }
             .duorain-shiny-effect {
                 position: absolute; content: ""; top: 0; left: 0; right: 0; bottom: 0;
-                background-image: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(0, 122, 255, 0.2), transparent 40%);
-                z-index: -1; pointer-events: none; transition: background-position 0.1s linear;
+                background-image: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(0, 122, 255, 0.25), transparent 40%);
+                z-index: 0; pointer-events: none; transition: background-position 0.1s linear;
             }
-            .duorain-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 10px; margin-bottom: 15px; }
-            .duorain-title { font-size: 26px; font-weight: bold; color: var(--duorain-text-primary); }
-            .duorain-version { font-size: 12px; color: var(--duorain-text-secondary); font-weight: bold; }
+            .duorain-header, .duorain-tabs, #duorain-status, #duorain-content { position: relative; z-index: 1; }
+            .duorain-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid rgba(var(--duo-text-secondary-rgb), 0.2); padding-bottom: 10px; margin-bottom: 15px; }
+            .duorain-title { font-size: 26px; font-weight: bold; color: var(--duo-text-primary); }
+            .duorain-version { font-size: 12px; color: var(--duo-text-secondary); font-weight: bold; }
             #duorain-status { padding: 10px; margin-bottom: 15px; border-radius: 12px; font-weight: bold; text-align: center; transition: all 0.3s ease; border: 1px solid transparent; }
-            .duorain-status-idle { background-color: rgba(229, 229, 234, 0.8); color: var(--duorain-text-secondary); }
-            .duorain-status-working { background-color: rgba(255, 204, 0, 0.8); color: var(--duorain-text-primary); border-color: rgba(255, 204, 0, 1); }
+            .duorain-status-idle { background-color: rgba(var(--duo-text-secondary-rgb), 0.1); color: var(--duo-text-secondary); }
+            .duorain-status-working { background-color: rgba(255, 204, 0, 0.8); color: var(--duo-text-primary); border-color: rgba(255, 204, 0, 1); }
             .duorain-status-success { background-color: rgba(52, 199, 89, 0.8); color: white; border-color: rgba(52, 199, 89, 1); }
             .duorain-status-error { background-color: rgba(255, 59, 48, 0.8); color: white; border-color: rgba(255, 59, 48, 1); }
-            .duorain-tabs { display: flex; margin-bottom: 15px; background: rgba(120, 120, 128, 0.12); border-radius: 10px; padding: 3px;}
+            .duorain-tabs { display: flex; margin-bottom: 15px; background: rgba(var(--duo-text-secondary-rgb), 0.1); border-radius: 10px; padding: 3px;}
             .duorain-tab-button {
                 flex-grow: 1; padding: 8px; border: none; background: transparent; cursor: pointer; font-weight: bold;
-                color: var(--duorain-text-secondary); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); border-radius: 8px;
+                color: var(--duo-text-secondary); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); border-radius: 8px;
             }
-            .duorain-tab-button.active { background: white; color: var(--duorain-blue); box-shadow: 0 3px 8px rgba(0,0,0,0.12); }
+            body.light .duorain-tab-button.active { background: white; }
+            body.dark .duorain-tab-button.active { background: var(--color-gray-800); }
+            .duorain-tab-button.active { color: var(--duo-color-blue); box-shadow: 0 3px 8px rgba(0,0,0,0.12); }
             .duorain-tab-content { display: none; }
             .duorain-tab-content.active { display: block; text-align: center; }
-            .duorain-label { font-size: 15px; color: var(--duorain-text-primary); margin-bottom: 8px; text-align: left; font-weight: bold;}
-            .duorain-desc { font-size: 13px; color: var(--duorain-text-secondary); margin-top: -5px; margin-bottom: 15px; text-align: left; }
+            .duorain-label { font-size: 15px; color: var(--duo-text-primary); margin-bottom: 8px; text-align: left; font-weight: bold;}
+            .duorain-desc { font-size: 13px; color: var(--duo-text-secondary); margin-top: -5px; margin-bottom: 15px; text-align: left; }
             .duorain-input {
-                width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #c7c7cc; background: rgba(242, 242, 247, 0.8);
-                box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center; color: var(--duorain-text-primary);
+                width: 100%; padding: 12px; border-radius: 10px; border: 1px solid transparent;
+                background: rgba(var(--duo-text-secondary-rgb), 0.1);
+                box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center; color: var(--duo-text-primary);
                 transition: border-color 0.2s, box-shadow 0.2s;
             }
-            .duorain-input:focus { border-color: var(--duorain-blue); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25); outline: none; }
+            .duorain-input:focus { border-color: var(--duo-color-blue); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25); outline: none; background: rgba(var(--duo-bg), 0.5); }
             .duorain-button-start {
-                width: 100%; padding: 14px; border-radius: 12px; border: none; background-image: linear-gradient(45deg, var(--duorain-green), #69c300); color: white;
+                width: 100%; padding: 14px; border-radius: 12px; border: none; background-image: linear-gradient(45deg, var(--duo-color-green), #69c300); color: white;
                 font-size: 18px; font-weight: bold; cursor: pointer;
                 transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 10px rgba(88, 167, 0, 0.3);
             }
@@ -191,25 +205,17 @@
 
     function getDuoHeaders(jwt) {
         return {
-            "authorization": `Bearer ${jwt}`,
-            "cookie": `jwt_token=${jwt}`,
-            "connection": "Keep-Alive",
-            "content-type": "application/json",
-            "user-agent": "Duolingo-Storm/1.0",
-            "x-duolingo-device-platform": "web",
-            "x-duolingo-app-version": "1.0.0",
-            "x-duolingo-application": "chrome",
-            "x-duolingo-client-version": "web",
-            "accept": "application/json"
+            "authorization": `Bearer ${jwt}`, "cookie": `jwt_token=${jwt}`, "connection": "Keep-Alive",
+            "content-type": "application/json", "user-agent": "Duolingo-Storm/1.0",
+            "x-duolingo-device-platform": "web", "x-duolingo-app-version": "1.0.0",
+            "x-duolingo-application": "chrome", "x-duolingo-client-version": "web", "accept": "application/json"
         };
     }
 
     function getUserData(jwt, sub) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: "GET",
-                url: `https://www.duolingo.com/2017-06-30/users/${sub}`,
-                headers: getDuoHeaders(jwt),
+                method: "GET", url: `https://www.duolingo.com/2017-06-30/users/${sub}`, headers: getDuoHeaders(jwt),
                 onload: function(response) {
                     if (response.status >= 200 && response.status < 300) {
                         const data = JSON.parse(response.responseText);
@@ -223,20 +229,19 @@
                         reject(new Error(`HTTP error! status: ${response.status}`));
                     }
                 },
-                onerror: function(error) {
-                    updateStatus("Failed to fetch user data.", "error");
-                    reject(error);
-                }
+                onerror: function(error) { updateStatus("Failed to fetch user data.", "error"); reject(error); }
             });
         });
     }
 
-    async function farmXp(jwt, fromLang, toLang, count, slug) {
+    async function farmXp(jwt, fromLang, toLang, count) {
         if (isFarming) return;
         toggleFarming(true);
         updateStatus("Farming XP...", "working");
 
+        const slug = `${toLang}-${fromLang}-le-passeport`;
         let totalXp = 0;
+
         for (let i = 0; i < count; i++) {
             const now_ts = Math.floor(Date.now() / 1000);
             const payload = {
@@ -248,10 +253,8 @@
 
             await new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
-                    method: "POST",
-                    url: `https://stories.duolingo.com/api2/stories/${slug}/complete`,
-                    headers: getDuoHeaders(jwt),
-                    data: JSON.stringify(payload),
+                    method: "POST", url: `https://stories.duolingo.com/api2/stories/${slug}/complete`,
+                    headers: getDuoHeaders(jwt), data: JSON.stringify(payload),
                     onload: function(response) {
                         if (response.status === 200) {
                             const data = JSON.parse(response.responseText);
@@ -295,10 +298,8 @@
             for (const reward of gemRewards) {
                  await new Promise(resolve => {
                     GM_xmlhttpRequest({
-                        method: 'PATCH',
-                        url: `https://www.duolingo.com/2017-06-30/users/${uid}/rewards/${reward}`,
-                        headers: getDuoHeaders(jwt),
-                        data: JSON.stringify({ "consumed": true, "fromLanguage": fromLang, "learningLanguage": toLang }),
+                        method: 'PATCH', url: `https://www.duolingo.com/2017-06-30/users/${uid}/rewards/${reward}`,
+                        headers: getDuoHeaders(jwt), data: JSON.stringify({ "consumed": true, "fromLanguage": fromLang, "learningLanguage": toLang }),
                         onload: response => { if(response.status !== 200) console.warn(`Failed to redeem ${reward}`); resolve(); },
                         onerror: () => { console.error(`Error redeeming ${reward}`); resolve(); }
                     });
@@ -392,11 +393,10 @@
 
             document.getElementById('start-xp-farm').addEventListener('click', () => {
                 const count = parseInt(document.getElementById('xp-loops-input').value, 10);
-                const slug = document.getElementById('story-slug-input').value.trim();
-                if (count > 0 && slug) {
-                    farmXp(jwt, fromLanguage, learningLanguage, count, slug);
+                if (count > 0) {
+                    farmXp(jwt, fromLanguage, learningLanguage, count);
                 } else {
-                    updateStatus("Please enter a valid slug and loop count.", "error");
+                    updateStatus("Please enter a valid loop count.", "error");
                 }
             });
 
