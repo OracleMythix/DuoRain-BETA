@@ -2,7 +2,7 @@
 // @name         DuoRain BETA
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  Duolingo XP, Gems, and Streak farming.
+// @description  Automates Duolingo XP, Gems, and Streaks.
 // @author       OracleMythix
 // @match        https://*.duolingo.com/*
 // @grant        GM_xmlhttpRequest
@@ -40,7 +40,7 @@
         const uiHTML = `
             <div id="duorain-main-container" class="duorain-hidden">
                 <div class="duorain-main-box">
-                    <div class="duorain-shiny-effect"></div>
+                    <div class="duorain-aurora-effect"></div>
                     <div class="duorain-header">
                         <span class="duorain-title">DuoRain</span>
                         <span class="duorain-version">v2.0</span>
@@ -53,7 +53,7 @@
                     </div>
                     <div id="duorain-content">
                         <div id="tab-xp" class="duorain-tab-content active">
-                            <p class="duorain-desc">This farms XP by rapidly completing a French story. Ensure you are enrolled in the 'French for English speakers' course.</p>
+                             <p class="duorain-desc">This farms XP by rapidly completing a French story. Ensure you are enrolled in the 'French for English speakers' course.</p>
                             <p class="duorain-label">Number of Loops</p>
                             <input type="number" id="xp-loops-input" class="duorain-input" placeholder="e.g., 100" min="1">
                             <button id="start-xp-farm" class="duorain-button-start">Start Farming XP</button>
@@ -80,86 +80,101 @@
             :root {
                 --duo-color-blue: #1cb0f6;
                 --duo-color-green: #58a700;
-                --duo-color-green-dark: #4a8d00;
                 --duo-color-yellow: #ffc800;
                 --duo-color-red: #ff4b4b;
-
-                --duo-bg: var(--color-snow-rgb, 255, 255, 255);
-                --duo-text-primary: var(--color-gray-800, #4c4c4c);
-                --duo-text-secondary: var(--color-gray-500, #afafaf);
-                --duo-border: var(--color-gray-200, #e5e5e5);
-                --duo-border-glow: rgba(255, 255, 255, 0.4);
+                --duo-color-text-active: #1cb0f6;
+                --duorain-bg-glass: rgba(255, 255, 255, 0.6);
+                --duorain-bg-input: rgba(242, 242, 247, 0.7);
+                --duorain-text-primary: #3c3c3c;
+                --duorain-text-secondary: #8e8e93;
+                --duorain-border-color: rgba(255, 255, 255, 0.5);
+                --duorain-tab-bg: rgba(120, 120, 128, 0.12);
+                --duorain-tab-active-bg: white;
             }
 
             body.dark {
-                --duo-bg: var(--color-gray-900-rgb, 25, 34, 49);
-                --duo-text-primary: var(--color-snow, #ffffff);
-                --duo-text-secondary: var(--color-gray-400, #9da4b0);
-                --duo-border: var(--color-gray-700, #3c4c5f);
-                --duo-border-glow: rgba(255, 255, 255, 0.1);
+                --duorain-bg-glass: rgba(28, 41, 58, 0.6);
+                --duorain-bg-input: rgba(50, 68, 88, 0.7);
+                --duorain-text-primary: #ffffff;
+                --duorain-text-secondary: #a0a7b3;
+                --duorain-border-color: rgba(255, 255, 255, 0.1);
+                --duorain-tab-bg: rgba(120, 120, 128, 0.24);
+                --duorain-tab-active-bg: #132132;
             }
 
             #duorain-toggle-button {
                 position: fixed; bottom: 20px; right: 20px; background-image: linear-gradient(45deg, var(--duo-color-blue), #5AC8FA);
                 color: white; padding: 12px 18px; border-radius: 50px; cursor: pointer;
                 font-family: "Duolingo Rounded", "Arial", sans-serif; font-weight: bold;
-                box-shadow: 0 5px 15px rgba(0, 122, 255, 0.3); z-index: 10000;
+                box-shadow: 0 5px 20px rgba(0, 122, 255, 0.35); z-index: 10000;
                 transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
             }
-            #duorain-toggle-button:hover { transform: scale(1.05); box-shadow: 0 8px 25px rgba(0, 122, 255, 0.4); }
+            #duorain-toggle-button:hover { transform: scale(1.05) translateY(-2px); box-shadow: 0 8px 25px rgba(0, 122, 255, 0.45); }
+
             #duorain-main-container {
                 position: fixed; bottom: 90px; right: 20px; width: 340px; font-family: "Duolingo Rounded", "Arial", sans-serif;
                 z-index: 9999; transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             }
+
             #duorain-main-container.duorain-hidden { opacity: 0; transform: scale(0.95) translateY(20px); pointer-events: none; }
+
             .duorain-main-box {
-                background: rgba(var(--duo-bg), 0.7);
-                backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-                border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); padding: 20px;
-                border: 1px solid var(--duo-border-glow);
+                background: var(--duorain-bg-glass);
+                backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+                border-radius: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); padding: 20px;
+                border: 1px solid var(--duorain-border-color);
                 position: relative; overflow: hidden;
             }
-            .duorain-shiny-effect {
-                position: absolute; content: ""; top: 0; left: 0; right: 0; bottom: 0;
-                background-image: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(0, 122, 255, 0.25), transparent 40%);
-                z-index: 0; pointer-events: none; transition: background-position 0.1s linear;
+            .duorain-aurora-effect {
+                position: absolute; content: ""; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%;
+                background-image: linear-gradient(135deg, rgba(0, 122, 255, 0.4) 0%, rgba(52, 199, 89, 0.3) 50%, rgba(255, 204, 0, 0.3) 100%);
+                filter: blur(50px);
+                transform: translate(calc(var(--mouse-x, 0.5) * 100% - 50%), calc(var(--mouse-y, 0.5) * 100% - 50%)) scale(2);
+                z-index: 0; pointer-events: none; transition: transform 0.2s linear;
             }
             .duorain-header, .duorain-tabs, #duorain-status, #duorain-content { position: relative; z-index: 1; }
-            .duorain-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid rgba(var(--duo-text-secondary-rgb), 0.2); padding-bottom: 10px; margin-bottom: 15px; }
-            .duorain-title { font-size: 26px; font-weight: bold; color: var(--duo-text-primary); }
-            .duorain-version { font-size: 12px; color: var(--duo-text-secondary); font-weight: bold; }
+            .duorain-header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid rgba(175, 175, 175, 0.2); padding-bottom: 10px; margin-bottom: 15px; }
+            .duorain-title {
+                font-size: 28px; font-weight: 900; color: transparent;
+                background-image: linear-gradient(45deg, #3c3c3c, #8e8e93);
+                background-clip: text; -webkit-background-clip: text;
+            }
+            body.dark .duorain-title { background-image: linear-gradient(45deg, #ffffff, #a0a7b3); }
+
+            .duorain-version { font-size: 12px; color: var(--duorain-text-secondary); font-weight: bold; }
+
             #duorain-status { padding: 10px; margin-bottom: 15px; border-radius: 12px; font-weight: bold; text-align: center; transition: all 0.3s ease; border: 1px solid transparent; }
-            .duorain-status-idle { background-color: rgba(var(--duo-text-secondary-rgb), 0.1); color: var(--duo-text-secondary); }
-            .duorain-status-working { background-color: rgba(255, 204, 0, 0.8); color: var(--duo-text-primary); border-color: rgba(255, 204, 0, 1); }
-            .duorain-status-success { background-color: rgba(52, 199, 89, 0.8); color: white; border-color: rgba(52, 199, 89, 1); }
-            .duorain-status-error { background-color: rgba(255, 59, 48, 0.8); color: white; border-color: rgba(255, 59, 48, 1); }
-            .duorain-tabs { display: flex; margin-bottom: 15px; background: rgba(var(--duo-text-secondary-rgb), 0.1); border-radius: 10px; padding: 3px;}
+            .duorain-status-idle { background-color: rgba(120, 120, 128, 0.12); color: var(--duorain-text-secondary); }
+            .duorain-status-working { background-color: rgba(var(--duo-color-yellow-rgb), 0.3); color: var(--duorain-text-primary); border-color: rgba(var(--duo-color-yellow-rgb), 0.5); }
+            .duorain-status-success { background-color: rgba(var(--duo-color-green-rgb), 0.3); color: var(--duo-color-green); border-color: rgba(var(--duo-color-green-rgb), 0.5); }
+            .duorain-status-error { background-color: rgba(var(--duo-color-red-rgb), 0.2); color: var(--duo-color-red); border-color: rgba(var(--duo-color-red-rgb), 0.4); }
+
+            .duorain-tabs { display: flex; margin-bottom: 15px; background: var(--duorain-tab-bg); border-radius: 10px; padding: 3px; }
             .duorain-tab-button {
                 flex-grow: 1; padding: 8px; border: none; background: transparent; cursor: pointer; font-weight: bold;
-                color: var(--duo-text-secondary); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); border-radius: 8px;
+                color: var(--duorain-text-secondary); transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); border-radius: 8px;
             }
-            body.light .duorain-tab-button.active { background: white; }
-            body.dark .duorain-tab-button.active { background: var(--color-gray-800); }
-            .duorain-tab-button.active { color: var(--duo-color-blue); box-shadow: 0 3px 8px rgba(0,0,0,0.12); }
+            .duorain-tab-button.active { background: var(--duorain-tab-active-bg); color: var(--duo-color-text-active); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
             .duorain-tab-content { display: none; }
             .duorain-tab-content.active { display: block; text-align: center; }
-            .duorain-label { font-size: 15px; color: var(--duo-text-primary); margin-bottom: 8px; text-align: left; font-weight: bold;}
-            .duorain-desc { font-size: 13px; color: var(--duo-text-secondary); margin-top: -5px; margin-bottom: 15px; text-align: left; }
+            .duorain-label { font-size: 15px; color: var(--duorain-text-primary); margin-bottom: 8px; text-align: left; font-weight: bold; }
+            .duorain-desc { font-size: 13px; color: var(--duorain-text-secondary); margin: -5px 0 15px 0; text-align: left; }
+
             .duorain-input {
-                width: 100%; padding: 12px; border-radius: 10px; border: 1px solid transparent;
-                background: rgba(var(--duo-text-secondary-rgb), 0.1);
-                box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center; color: var(--duo-text-primary);
+                width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--duorain-border-color); background: var(--duorain-bg-input);
+                box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center; color: var(--duorain-text-primary);
                 transition: border-color 0.2s, box-shadow 0.2s;
             }
-            .duorain-input:focus { border-color: var(--duo-color-blue); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25); outline: none; background: rgba(var(--duo-bg), 0.5); }
+            .duorain-input:focus { border-color: var(--duo-color-blue); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.3); outline: none; background: transparent; }
+
             .duorain-button-start {
                 width: 100%; padding: 14px; border-radius: 12px; border: none; background-image: linear-gradient(45deg, var(--duo-color-green), #69c300); color: white;
                 font-size: 18px; font-weight: bold; cursor: pointer;
-                transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 10px rgba(88, 167, 0, 0.3);
+                transition: transform 0.2s ease, box-shadow 0.2s ease; box-shadow: 0 4px 10px rgba(88, 167, 0, 0.3);
             }
             .duorain-button-start:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(88, 167, 0, 0.4); }
-            .duorain-button-start:active { transform: translateY(0); }
-            .duorain-button-start:disabled { background-image: none; background-color: #afafaf; box-shadow: none; cursor: not-allowed; }
+            .duorain-button-start:active { transform: translateY(0px) scale(0.98); }
+            .duorain-button-start:disabled { background-image: none; background-color: var(--duorain-text-secondary); opacity: 0.5; box-shadow: none; cursor: not-allowed; }
         `;
 
         document.body.insertAdjacentHTML('beforeend', uiHTML);
