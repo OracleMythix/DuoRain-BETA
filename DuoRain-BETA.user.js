@@ -52,8 +52,9 @@
                     </div>
                     <div id="duorain-content">
                         <div id="tab-xp" class="duorain-tab-content active">
-                            <p class="duorain-label">Story Slug (Course Specific)</p>
+                            <p class="duorain-label">Story Slug</p>
                             <input type="text" id="story-slug-input" class="duorain-input" value="fr-en-le-passeport">
+                            <p class="duorain-desc">Find in a story's URL. Must match your course.</p>
                             <p class="duorain-label">Number of Loops</p>
                             <input type="number" id="xp-loops-input" class="duorain-input" placeholder="e.g., 100" min="1">
                             <button id="start-xp-farm" class="duorain-button-start">Start Farming XP</button>
@@ -107,7 +108,8 @@
             .duorain-tab-button.active { background: #1cb0f6; color: white; }
             .duorain-tab-content { display: none; }
             .duorain-tab-content.active { display: block; text-align: center; }
-            .duorain-label { font-size: 14px; color: #777; margin-bottom: 5px; text-align: left; }
+            .duorain-label { font-size: 14px; color: #4c4c4c; margin-bottom: 5px; text-align: left; font-weight: bold;}
+            .duorain-desc { font-size: 12px; color: #afafaf; margin-top: -10px; margin-bottom: 15px; text-align: left; }
             .duorain-input {
                 width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #e5e5e5;
                 box-sizing: border-box; margin-bottom: 15px; font-size: 16px; text-align: center;
@@ -154,12 +156,27 @@
         startButtons().forEach(btn => btn.disabled = state);
     }
 
+    function getDuoHeaders(jwt) {
+        return {
+            "authorization": `Bearer ${jwt}`,
+            "cookie": `jwt_token=${jwt}`,
+            "connection": "Keep-Alive",
+            "content-type": "application/json",
+            "user-agent": "Duolingo-Storm/1.0",
+            "x-duolingo-device-platform": "web",
+            "x-duolingo-app-version": "1.0.0",
+            "x-duolingo-application": "chrome",
+            "x-duolingo-client-version": "web",
+            "accept": "application/json"
+        };
+    }
+
     function getUserData(jwt, sub) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "GET",
                 url: `https://www.duolingo.com/2017-06-30/users/${sub}`,
-                headers: { "Authorization": `Bearer ${jwt}` },
+                headers: getDuoHeaders(jwt),
                 onload: function(response) {
                     if (response.status >= 200 && response.status < 300) {
                         const data = JSON.parse(response.responseText);
@@ -186,11 +203,6 @@
         toggleFarming(true);
         updateStatus("Farming XP...", "working");
 
-        const headers = {
-            "authorization": `Bearer ${jwt}`,
-            "user-agent": "Duolingo-Storm/1.0",
-        };
-
         let totalXp = 0;
         for (let i = 0; i < count; i++) {
             const now_ts = Math.floor(Date.now() / 1000);
@@ -205,7 +217,7 @@
                 GM_xmlhttpRequest({
                     method: "POST",
                     url: `https://stories.duolingo.com/api2/stories/${slug}/complete`,
-                    headers: headers,
+                    headers: getDuoHeaders(jwt),
                     data: JSON.stringify(payload),
                     onload: function(response) {
                         if (response.status === 200) {
@@ -215,7 +227,8 @@
                             updateStatus(`Loop ${i + 1}/${count} | +${awardedXp} XP | Total: ${totalXp}`, "working");
                             resolve();
                         } else {
-                            updateStatus(`Error loop ${i + 1}: ${response.statusText}`, "error");
+                            updateStatus(`Error loop ${i + 1}: ${response.status} - See console`, "error");
+                            console.error('XP Farm Error Response:', response.responseText);
                             toggleFarming(false);
                             reject(new Error(response.statusText));
                         }
@@ -242,7 +255,6 @@
         toggleFarming(true);
         updateStatus("Farming Gems...", "working");
 
-        const headers = { "Authorization": `Bearer ${jwt}` };
         const gemRewards = ["SKILL_COMPLETION_BALANCED-...-2-GEMS", "SKILL_COMPLETION_BALANCED-...-2-GEMS"];
         let totalGems = 0;
 
@@ -252,7 +264,7 @@
                     GM_xmlhttpRequest({
                         method: 'PATCH',
                         url: `https://www.duolingo.com/2017-06-30/users/${uid}/rewards/${reward}`,
-                        headers,
+                        headers: getDuoHeaders(jwt),
                         data: JSON.stringify({ "consumed": true, "fromLanguage": fromLang, "learningLanguage": toLang }),
                         onload: response => { if(response.status !== 200) console.warn(`Failed to redeem ${reward}`); resolve(); },
                         onerror: () => { console.error(`Error redeeming ${reward}`); resolve(); }
@@ -281,7 +293,6 @@
         const startDate = userData.streakStartDate ? new Date(userData.streakStartDate) : new Date();
         updateStatus(`Starting streak farm from ${startDate.toISOString().split('T')[0]}`, "working");
 
-        const headers = { "Authorization": `Bearer ${jwt}`, "Content-Type": "application/json" };
         const SESSIONS_URL = "https://www.duolingo.com/2017-06-30/sessions";
         const CHALLENGE_TYPES = ["assist", "characterIntro", "characterMatch", "characterPuzzle", "characterSelect", "characterTrace", "characterWrite", "completeReverseTranslation", "definition", "dialogue", "extendedMatch", "extendedListenMatch", "form", "freeResponse", "gapFill", "judge", "listen", "listenComplete", "listenMatch", "match", "name", "listenComprehension", "listenIsolation", "listenSpeak", "listenTap", "orderTapComplete", "partialListen", "partialReverseTranslate", "patternTapComplete", "radioBinary", "radioImageSelect", "radioListenMatch", "radioListenRecognize", "radioSelect", "readComprehension", "reverseAssist", "sameDifferent", "select", "selectPronunciation", "selectTranscription", "svgPuzzle", "syllableTap", "syllableListenTap", "speak", "tapCloze", "tapClozeTable", "tapComplete", "tapCompleteTable", "tapDescribe", "translate", "transliterate", "transliterationAssist", "typeCloze", "typeClozeTable", "typeComplete", "typeCompleteTable", "writeComprehension"];
 
@@ -297,8 +308,8 @@
 
             await new Promise(resolve => {
                 GM_xmlhttpRequest({
-                    method: 'POST', url: SESSIONS_URL, headers, data: JSON.stringify(postPayload),
-                    onload: async (r1) => {
+                    method: 'POST', url: SESSIONS_URL, headers: getDuoHeaders(jwt), data: JSON.stringify(postPayload),
+                    onload: (r1) => {
                         if (r1.status !== 200) { console.error(`POST fail for ${simDay.toISOString().split('T')[0]}`); resolve(); return; }
                         const sessionData = JSON.parse(r1.responseText);
                         const sessionId = sessionData.id;
@@ -309,7 +320,7 @@
                         const putPayload = { ...sessionData, "heartsLeft": 5, "startTime": startTs, "endTime": endTs, "enableBonusPoints": false, "failed": false, "maxInLessonStreak": 9, "shouldLearnThings": true };
 
                         GM_xmlhttpRequest({
-                             method: 'PUT', url: `${SESSIONS_URL}/${sessionId}`, headers, data: JSON.stringify(putPayload),
+                             method: 'PUT', url: `${SESSIONS_URL}/${sessionId}`, headers: getDuoHeaders(jwt), data: JSON.stringify(putPayload),
                              onload: (r2) => { if (r2.status !== 200) console.error(`PUT fail for ${simDay.toISOString().split('T')[0]}`); resolve(); },
                              onerror: () => { console.error(`PUT request fail`); resolve(); }
                         });
