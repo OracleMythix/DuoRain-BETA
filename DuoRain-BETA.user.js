@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DuoRain BETA
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  Duolingo XP, Gems, and Streak farming Tool.
 // @author       OracleMythix
 // @match        https://*.duolingo.com/*
@@ -43,16 +43,13 @@
                     <div class="DLP_VStack_8">
                        <div class="DLP_HStack_Auto_Top DLP_NoSelect">
                             <div class="DLP_HStack_4">
-                                <p class="DLP_Text_Style_2">DuoRain</p>
+                                <p class="DLP_Text_Style_2">Duo<span class="duorain-neon-blue">Rain</span></p>
                             </div>
                             <p class="DLP_Text_Style_1" style="margin-top: 2px; font-size: 14px; color: #FF9500;">BETA</p>
                         </div>
                         <div id="duorain-status-area">
                             <div id="duorain-status-indicator" class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect idle">
                                 <p id="duorain-status-indicator-text" class="DLP_Text_Style_1">Status: Idle</p>
-                            </div>
-                            <div id="duorain-running-farms-list">
-                                <div></div>
                             </div>
                         </div>
                         <div class="DLP_VStack_8" id="DLP_Main_Inputs_1_Divider_1_ID">
@@ -93,6 +90,20 @@
                     </div>
                 </div>
             </div>
+            <div id="duorain-tasks-container" class="duorain-hidden">
+                 <div class="DLP_Main_Box">
+                    <div class="DLP_VStack_8">
+                       <div class="DLP_HStack_Auto_Top DLP_NoSelect">
+                            <p class="DLP_Text_Style_2">Running Tasks</p>
+                            <div id="duorain-close-tasks-button" class="DLP_Magnetic_Hover_1" style="cursor: pointer; padding: 4px;">
+                                 <p class="DLP_Text_Style_1" style="font-size: 14px; opacity: 0.8;">BACK</p>
+                            </div>
+                        </div>
+                        <div id="duorain-running-tasks-list-content" class="DLP_VStack_8" style="margin-top: 8px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
              <div id="duorain-toggle-button" class="DLP_Magnetic_Hover_1 DLP_NoSelect">
                 <span>Storm 🌪️</span>
             </div>
@@ -114,8 +125,8 @@
                 --duorain-running-text: #f57c00;
             }
 
-            html._2L9MF { /* This is Duolingo's dark mode class */
-                --duorain-bg-color: rgb(var(--color-snow), 0.8);
+            html._2L9MF {
+                --duorain-bg-color: rgb(var(--color-gray-9), 0.8);
                 --duorain-text-color: rgb(var(--color-snow));
                 --duorain-border-color: rgb(var(--color-gray-2), 0.10);
                 --duorain-input-bg: rgba(0, 0, 0, 0.2);
@@ -133,11 +144,12 @@
             .DLP_NoSelect { -webkit-user-select: none; -ms-user-select: none; user-select: none; }
             .DLP_Text_Style_1 { font-family: "DuoRain", sans-serif; font-size: 16px; font-weight: 500; margin: 0; transition: color 0.4s ease; }
             .DLP_Text_Style_2 { font-family: "DuoRain", sans-serif; font-size: 24px; font-weight: 500; margin: 0; transition: color 0.4s ease; }
+            .duorain-neon-blue { color: #03A9F4; text-shadow: 0 0 2px #03A9F4, 0 0 6px #2196F3; }
             .DLP_Magnetic_Hover_1 { transition: filter 0.4s, transform 0.4s; cursor: pointer; }
             .DLP_Magnetic_Hover_1:hover { filter: brightness(0.9); transform: scale(1.05); }
             .DLP_Magnetic_Hover_1:active { filter: brightness(0.9); transform: scale(0.9); }
-            #duorain-main-container { display: flex; flex-direction: column; gap: 8px; position: fixed; right: 16px; bottom: 80px; z-index: 9999; transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-            #duorain-main-container.duorain-hidden { opacity: 0; transform: scale(0.95) translateY(20px); pointer-events: none; }
+            #duorain-main-container, #duorain-tasks-container { display: flex; flex-direction: column; gap: 8px; position: fixed; right: 16px; bottom: 80px; z-index: 9999; transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+            #duorain-main-container.duorain-hidden, #duorain-tasks-container.duorain-hidden { opacity: 0; transform: scale(0.95) translateY(20px); pointer-events: none; }
             .DLP_Main_Box { display: flex; width: 340px; padding: 24px 20px; box-sizing: border-box; flex-direction: column; gap: 8px; border-radius: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); transition: background 0.4s ease, border-color 0.4s ease, backdrop-filter 0.4s ease; background: var(--duorain-bg-color); backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); border: 1px solid var(--duorain-border-color); }
             .DLP_HStack_Auto_Top, .DLP_HStack_4, .DLP_HStack_8 { display: flex; align-items: center; align-self: stretch; }
             .DLP_HStack_Auto_Top { justify-content: space-between; align-items: flex-start; }
@@ -152,10 +164,8 @@
             .DLP_Input_Input_Style_1::-webkit-outer-spin-button, .DLP_Input_Input_Style_1::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
             #duorain-status-area { margin-bottom: 8px; }
             #duorain-status-indicator { justify-content: center; transition: all 0.3s ease; }
-            #duorain-running-farms-list { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.3s ease-out; }
-            #duorain-running-farms-list.expanded { grid-template-rows: 1fr; }
-            #duorain-running-farms-list > div { overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
-            .duorain-farm-status-box { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 12px; transition: background-color 0.4s ease; background-color: var(--duorain-status-box-bg); }
+            #duorain-running-tasks-list-content { width: 100%; }
+            .duorain-farm-status-box { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 12px; transition: background-color 0.4s ease; background-color: var(--duorain-status-box-bg); width: 100%; box-sizing: border-box; }
             .duorain-farm-status-box .status-text { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .duorain-farm-status-box .duorain-button-stop { padding: 4px 10px; border-radius: 8px; border: none; background-color: #FF3B30; color: white; font-size: 12px; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
             #duorain-toggle-button { position: fixed; bottom: 20px; right: 20px; background-image: linear-gradient(45deg, #007AFF, #5AC8FA); color: white; padding: 12px 18px; border-radius: 50px; cursor: pointer; font-family: "DuoRain", sans-serif; font-weight: bold; box-shadow: 0 5px 20px rgba(0, 122, 255, 0.35); z-index: 10000; }
@@ -171,27 +181,34 @@
         document.body.insertAdjacentHTML('beforeend', uiHTML);
         GM_addStyle(uiStyle);
 
+        const mainContainer = document.getElementById('duorain-main-container');
+        const tasksContainer = document.getElementById('duorain-tasks-container');
+
         document.getElementById('duorain-toggle-button').addEventListener('click', () => {
-            document.getElementById('duorain-main-container').classList.toggle('duorain-hidden');
+            mainContainer.classList.toggle('duorain-hidden');
+            tasksContainer.classList.add('duorain-hidden'); // Always hide tasks when toggling main
         });
+
         document.getElementById('duorain-status-indicator').addEventListener('click', () => {
-            if (document.querySelectorAll('.duorain-farm-status-box').length > 0) {
-                document.getElementById('duorain-running-farms-list').classList.toggle('expanded');
+            if (activeFarms.size > 0) {
+                mainContainer.classList.add('duorain-hidden');
+                tasksContainer.classList.remove('duorain-hidden');
             }
         });
-    }
 
-    // No longer need the theme observer, so these functions can be removed.
-    // function setupThemeObserver() { ... }
-    // function updateTheme() { ... }
+        document.getElementById('duorain-close-tasks-button').addEventListener('click', () => {
+            tasksContainer.classList.add('duorain-hidden');
+            mainContainer.classList.remove('duorain-hidden');
+        });
+    }
 
     const activeFarms = new Map();
 
     function updateMasterStatus() {
         const indicator = document.getElementById('duorain-status-indicator');
         const indicatorText = document.getElementById('duorain-status-indicator-text');
-        const list = document.getElementById('duorain-running-farms-list');
         const farmCount = activeFarms.size;
+
         if (farmCount > 0) {
             indicator.classList.remove('idle');
             indicator.classList.add('running');
@@ -200,12 +217,12 @@
             indicator.classList.remove('running');
             indicator.classList.add('idle');
             indicatorText.textContent = 'Status: Idle';
-            list.classList.remove('expanded');
+            document.getElementById('duorain-tasks-container').classList.add('duorain-hidden'); // Hide tasks panel when all finish
         }
     }
 
     function addFarmUI(farmId, message) {
-        const container = document.getElementById('duorain-running-farms-list').firstElementChild;
+        const container = document.getElementById('duorain-running-tasks-list-content');
         const farmBox = document.createElement('div');
         farmBox.id = `farm-status-${farmId}`;
         farmBox.className = 'duorain-farm-status-box';
@@ -349,7 +366,6 @@
 
     async function main() {
         injectUI();
-        // setupThemeObserver(); // This is no longer needed.
         const jwt = getJwtToken();
         const indicatorText = document.getElementById('duorain-status-indicator-text');
         const inputsContainer = document.getElementById('DLP_Main_Inputs_1_Divider_1_ID');
