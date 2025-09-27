@@ -42,9 +42,7 @@
 
 ---
 
-## 🖼️ Screenshots  
-
-Here are some screenshots of **DuoRain**:  
+## 🖼️ Images
 
 <p align="center">
   <a href="assets/1.png">
