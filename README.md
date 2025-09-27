@@ -42,6 +42,36 @@
 
 ---
 
+## 🖼️ Screenshots  
+
+Here are some screenshots of **DuoRain**:  
+
+<p align="center">
+  <a href="assets/1.png">
+    <img src="assets/1.png" alt="Screenshot 1" width="800"/>
+  </a>
+</p>
+
+<p align="center">
+  <a href="assets/2.png">
+    <img src="assets/2.png" alt="Screenshot 2" width="800"/>
+  </a>
+</p>
+
+<p align="center">
+  <a href="assets/3.png">
+    <img src="assets/3.png" alt="Screenshot 3" width="800"/>
+  </a>
+</p>
+
+<p align="center">
+  <a href="assets/4.png">
+    <img src="assets/4.png" alt="Screenshot 4" width="800"/>
+  </a>
+</p>
+
+---
+
 ## 🛠️ Requirements
 
 - 🧩 Extension: [Tampermonkey](https://www.tampermonkey.net/) or [Greasemonkey](https://www.greasespot.net/)
