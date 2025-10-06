@@ -23,7 +23,7 @@
 
 > *The Auto-Solver automatically completes various types of lessons and practices for you. It features two main components:*
 
-- 🧩 **Easy Solve** — Solve any lesson by solving one easy challenge and it can solve stories, lessons, legendary lessons and stories and Audio Lessons.
+- 🧩 **Easy Solve** — Solve any lesson by solving one easy challenge and it can solve stories, lessons, legendary lessons and audio lessons.
 - 🖱️ **Auto-Clicker** — Automatically clicks through the simplified lessons, requiring no user interaction.
 
 **Supported Modes:**
