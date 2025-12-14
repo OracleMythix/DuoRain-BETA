@@ -8,25 +8,19 @@
         font-style: normal;
       }
     </style>
-
     <linearGradient id="skyGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1bc2f5ff"/><stop offset="100%" stop-color="#07f"/></linearGradient>
     <linearGradient id="shallowWater" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0077ffff" stop-opacity=".8"/><stop offset="100%" stop-color="#06f" stop-opacity=".9"/></linearGradient>
     <linearGradient id="deepSea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0040ff"/><stop offset="100%" stop-color="#000530"/></linearGradient>
     <filter id="neonGlow"><feDropShadow dx="0" dy="0" stdDeviation="3.5" flood-color="#00c6ff" flood-opacity=".9"/></filter>
     <filter id="diffuseFilter" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter>
     
-    <!-- "Rain" Definition 
-         x="115" ensures it does not touch "Duo" -->
-    <text id="textRef" font-family="'Fugaz One', sans-serif" font-size="52" letter-spacing="0" x="95" y="52">Rain</text>
+    <text id="textRef" font-family="'Fugaz One', sans-serif" font-size="52" letter-spacing="0" x="116" y="52">Rain</text>
     
-    <path id="organicWave" d="m0 40 3.39.69 3.39.52 3.39.3 3.39.04 3.39-.21 3.39-.42 3.39-.57 3.39-.62 3.39-.59 3.39-.48 3.39-.29 3.39-.09 3.39.13 3.39.29 3.39.41 3.39.44 3.39.41 3.39.31 3.39.16 3.39.03 3.39-.11 3.39-.2 3.39-.23 3.39-.2 3.39-.13 3.39-.02 3.39.07 3.39.14 3.39.16 3.38.1 3.39-.02 3.39-.21 3.39-.44 3.39-.66 3.39-.87 3.39-1.02 3.39-1.08 3.39-1.04 3.39-.9 3.39-.7 3.39-.44 3.39-.17 3.39.1 3.39.31 3.39.45 3.39.52 3.39.51 3.39.46 3.39.37 3.39.29 3.39.24 3.39.23 3.39.27 3.39.36 3.39.49 3.39.62 3.39.72 3.39.79L200 40v60H0Z"/>
+    <path id="organicWave" d="m0 40 3.39.69 3.39.52 3.39.3 3.39.04 3.39-.21 3.39-.42 3.39-.57 3.39-.62 3.39-.59 3.39-.48 3.39-.29 3.39-.09 3.39.13 3.39.29 3.39.41 3.39.44 3.39.41 3.39.31 3.39.16 3.39.03 3.39-.11 3.39-.2 3.39-.23 3.39-.2 3.39-.13 3.39-.02 3.39.07 3.39.14 3.39.16 3.38.1 3.39-.02 3.39-.21 3.39-.44 3.39-.66 3.39-.87 3.39-1.02 3.39-1.08 3.39-1.04 3.39-.9 3.39-.7 3.39-.44 3.39-.17 3.39.1 3.39.31 3.39.45 3.39.52 3.39.51 3.39.46 3.39.37 3.39.29 3.39.24 3.39.23 3.39.27 3.39.36 3.39.49 3.39.62 3.39.72 3.39.79L250 40v60H0Z"/>
     <mask id="rainMask"><use xlink:href="#textRef" fill="#fff"/></mask>
   </defs>
-
-  <!-- "Duo" Text -->
-  <text x="2" y="52" fill="#fff" filter="url(#neonGlow)" font-family="'Fugaz One', sans-serif" font-size="52" letter-spacing="0">Duo</text>
-
-  <!-- Masked Water Effect -->
+  <text x="20" y="52" fill="#fff" filter="url(#neonGlow)" font-family="'Fugaz One', sans-serif" font-size="52" letter-spacing="0">Duo</text>
+  
   <g filter="url(#neonGlow)">
     <g mask="url(#rainMask)">
       <path fill="url(#skyGradient)" d="M0 0h260v70H0z"/>
