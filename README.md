@@ -1,98 +1,144 @@
-# 🌪️ DuoRain 🌪️
-> **v4.0 BETA** - *An Open-Source Tampermonkey/Greasemonkey userscript that automates Duolingo XP, Gems, Streaks, Quests, and Lessons.*
+<div align="center">
+  <img
+    src="https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/assets/DuoRain-Icon.png"
+    width="120"
+    height="120"
+    alt="DuoRain Logo"
+  />
+
+  <br>
+
+  <img src="assets/header.svg" width="320" alt="DuoRain" />
+
+  <p>
+    <strong>v5.0.0 · BETA</strong><br>
+    <em>⚙️ Advanced Automation Suite for Duolingo (Web)</em>
+  </p>
+
+  <p>
+    <a href="https://github.com/OracleMythix/DuoRain-BETA/blob/main/LICENSE">
+      <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License" />
+    </a>
+    <a href="https://greasyfork.org/en/scripts/547811-duorain-beta">
+      <img src="https://img.shields.io/badge/Install-GreasyFork-success.svg" alt="Install on GreasyFork" />
+    </a>
+  </p>
+</div>
 
 ---
 
-## ✨ Farming Features
+## 🌧️ Overview
 
-- 📈 **XP Farming** — Automate XP gain.
-> *~499 XP per loop.*
+**DuoRain** is a powerful, open-source **Tampermonkey / Greasemonkey userscript** designed to automate and manage multiple aspects of the Duolingo web experience.
+It operates entirely client-side through your browser and provides a modern, modular control panel for precision automation.
 
-- 💎 **Gem Farming** — Automate Gem acquisition.
-> *~120 Gems per loop.*
-
-- 🔥 **Streak Farming** — Farm/Repair Streaks.
-> *Set the number of days you need to repair/farm.*
-
-- 🎯 **Quest & Badge Unlocker** — Completes all of your past monthly quests and current daily and monthly quests.
-> *This feature grants you all the monthly quest badges you've missed and complete your current daily and monthly quests.*
+Supported systems include **XP, Gems, Streaks, Quests, Shops, and Competitive Leagues**.
 
 ---
 
-## 🤖 Auto-Solver
+## ✨ Features
 
-> *The Auto-Solver automatically completes various types of lessons and practices for you. It features two main components:*
+### 🤖 Automation
 
-- 🧩 **Easy Solve** — Solve any lesson by solving one easy challenge and it can solve stories, lessons, legendary lessons and audio lessons.
-- 🖱️ **Auto-Clicker** — Automatically clicks through the simplified lessons, requiring no user interaction.
+* **📈 XP Farming**
+  Automated lesson simulation optimized for fast XP gains.
+  *≈ 499 XP per loop (configuration-dependent)*
 
-**Supported Modes:**
-- **Path Solver**: Completes lessons directly on your learning path.(this is buggy and will be fixed in next update)
-- **Practice Solver**: Solves exercises from the Practice Hub.(this is buggy and will be fixed in next update)
-- **Listening Solver**: Completes listening practices.(this is buggy and will be fixed in next update)
-- **Specific Lesson Solver**: Repeats and solves a specific lesson from any unit you choose.(this is buggy and will be fixed in next update)
+* **💎 Gem Farming**
+  Reward endpoint automation for continuous gem accumulation.
+  *≈ 60 gems per loop*
 
----
-
-## ⚡ Utilities
-
-- ❤️ **Refill Hearts** — Instantly refill your hearts to full.
-- ❄️ **Get Streak Freeze** — Redeem up to 3 Streak Freezes at a time.
-- 🚀 **Redeem XP Boost** — Activate XP Boosts Instantly.
+* **🔥 Streak Management**
+  Restore missed days or extend streaks backward or forward instantly.
 
 ---
 
-## 🖼️ Images
+### 🏆 Leagues & Leaderboards
 
-<p align="center">
-  <a href="assets/1.png">
-    <img src="assets/1.png" alt="Screenshot 1" width="800"/>
-  </a>
-</p>
+* **🛡️ League Saver (Sniper Mode)**
+  Real-time leaderboard monitoring with automatic XP farming to:
 
-<p align="center">
-  <a href="assets/2.png">
-    <img src="assets/2.png" alt="Screenshot 2" width="800"/>
-  </a>
-</p>
-
-<p align="center">
-  <a href="assets/3.png">
-    <img src="assets/3.png" alt="Screenshot 3" width="800"/>
-  </a>
-</p>
-
-<p align="center">
-  <a href="assets/4.png">
-    <img src="assets/4.png" alt="Screenshot 4" width="800"/>
-  </a>
-</p>
+  * Maintain a target rank (e.g., #1)
+  * Apply configurable safety buffers against competitors
 
 ---
 
-## 🛠️ Requirements
+### 🎯 Quests & Rewards
 
-- 🧩 Extension: [Tampermonkey](https://www.tampermonkey.net/) or [Greasemonkey](https://www.greasespot.net/)
+* **⚡ Quest Completion Engine**
+  Instantly completes:
+
+  * Daily Quests
+  * Monthly Quests
+  (*Includes a retroactive monthly badge claimer*)
+  * Friends Quests
+
+* **🛒 Free Shop Items**
+  Purchase Duolingo shop items for **free**, including:
+
+  * Streak freezes
+  * XP boosts
+  * Outfits
+  * And many more items...
+
+---
+
+### 🧩 Account & Utilities
+
+* **👤 Multi-Account Switcher**
+  Save, load, and switch between multiple Duolingo accounts without logging out.
+
+* **🔓 Super / Max Unlocker**
+
+  * **🆓 Free Max**: Unlocks Super/Max themes, UI features, exclusive practice lessons, and unlimited hearts (web only)
+  * **🎟️ Legit Trial**: Activates the official 3-day Super Duolingo trial (if eligible)
+
+* **⚙️ Advanced Settings**
+
+  * Public / Private profile toggle
+  * Custom loop delay (milliseconds)
+  * Automatic light/dark theme detection
 
 ---
 
 ## 📥 Installation
 
-1. Install a userscript manager.
-2. Click [DuoRain-BETA.user.js](https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/DuoRain-BETA.user.js) or Install from [GreasyFork](https://greasyfork.org/en/scripts/547811-duorain-beta).
-3. Confirm installation in your userscript manager.
-4. Visit [Duolingo](https://www.duolingo.com).
+### 1️⃣ Install a Userscript Manager
+
+* [Tampermonkey](https://www.tampermonkey.net/) (recommended)
+* [Greasemonkey](https://www.greasespot.net/)
+
+### 2️⃣ Install DuoRain
+
+* **Direct install:**
+  [https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/DuoRain-BETA.user.js](https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/DuoRain-BETA.user.js)
+* **Alternative:**
+  [https://greasyfork.org/en/scripts/547811-duorain-beta](https://greasyfork.org/en/scripts/547811-duorain-beta)
+
+### 3️⃣ Usage
+
+1. Open [https://www.duolingo.com](https://www.duolingo.com)
+2. Locate the floating **DuoRain Orb** in the bottom-left corner
+3. Click to open the DuoRain Mod-menu
 
 ---
 
 ## ⚠️ Disclaimer
 
-- ❌ This project is **not affiliated with or endorsed by Duolingo**.
-- ⚠️ For educational and experimental purposes only. Use at your own risk.
+* **❌ No Affiliation**
+  DuoRain is not affiliated with, endorsed by, or connected to Duolingo, Inc.
+
+* **⚠️ Risk Notice**
+  This script interacts with internal Duolingo APIs. Excessive or careless usage may result in account restrictions.
+  The author assumes no responsibility for bans, suspensions, or data loss.
+
+* **📚 Purpose**
+  Provided strictly for educational, research, and experimental use.
 
 ---
 
 ## 👤 Author
 
-- [OracleMythix](https://github.com/OracleMythix)
-- 📦 Repository: [DuoRain-BETA](https://github.com/OracleMythix/DuoRain-BETA)
+**OracleMythix**
+* GitHub: [https://github.com/OracleMythix](https://github.com/OracleMythix)
+* Repository: [https://github.com/OracleMythix/DuoRain-BETA](https://github.com/OracleMythix/DuoRain-BETA)
