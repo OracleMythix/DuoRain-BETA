@@ -1,1740 +1,2054 @@
 // ==UserScript==
 // @name         DuoRain
 // @namespace    http://tampermonkey.net/
-// @version      4.0.BETA
-// @description  Duolingo XP farming, Gems farming, Streak farming, Auto-Quest and Auto-Solver Tool.
+// @version      5.0.0.BETA
+// @description  Ultimate Automation Tool for Duolingo
+// @icon         https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/assets/DuoRain-Icon.png
 // @author       OracleMythix
 // @license      MIT
 // @match        https://*.duolingo.com/*
+// @match        https://*.duolingo.cn/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        unsafeWindow
 // @connect      duolingo.com
 // @connect      stories.duolingo.com
 // @connect      goals-api.duolingo.com
+// @connect      ios-api-2.duolingo.com
+// @connect      duolingo-leaderboards-prod.duolingo.com
+// @connect      fonts.googleapis.com
+// @connect      fonts.gstatic.com
 // @run-at       document-start
 // ==/UserScript==
- 
+
 (function() {
 'use strict';
- 
-const MODIFIER_KEY = 'duoRainModifierEnabledV41';
-const AUTO_CLICK_KEY = 'duoRainAutoClickEnabledV41';
-const SOLVER_SESSION_KEY = 'duoRainSolverSessionV41';
-const RELOAD_FLAG = 'duoRainReloaded';
-sessionStorage.removeItem(RELOAD_FLAG);
- 
-function injectNetworkInterceptor() {
-    const script = document.createElement('script');
-    script.id = 'duorain-network-interceptor';
-    script.textContent = `
-    (() => {
-        const MODIFIER_KEY = '${MODIFIER_KEY}';
-        const LESSON_CHALLENGE_CONTENT = { "passage": "DuoRain Lesson Automation", "question": "Join DuoRain Discord Server.", "choices": ["DuoRain"], "correctIndex": 0, "type": "readComprehension" };
-        const STORY_HEADER_CONTENT = { "text": "DuoRain", "hints": ["Join", "DuoRain Discord Server"] };
-        const originalFetch = window.fetch;
- 
-        window.fetch = async (...args) => {
-            const request = new Request(args[0], args[1]);
-            if (sessionStorage.getItem(MODIFIER_KEY) !== 'true') return originalFetch(request);
- 
-            if (request.url.includes('stories.duolingo.com/api2/stories/')) {
-                try {
-                    const response = await originalFetch(request);
-                    if (!response.ok) return response;
-                    const data = await response.json();
-                    if (data.elements && data.elements.length > 0) {
-                        const storyHeader = { ...data.elements[0] };
-                        storyHeader.learningLanguageTitleContent = { ...storyHeader.learningLanguageTitleContent, ...STORY_HEADER_CONTENT };
-                        data.elements = [storyHeader];
-                    }
-                    return new Response(JSON.stringify(data), { status: response.status, headers: response.headers });
-                } catch (e) {console.error("DuoRain Interceptor Error (Stories):", e);}
+
+const config = {
+    dim: { width: 900, height: 600 },
+    id: { app: "duorain-app", win: "duorain-win", orb: "duorain-orb" },
+    api: {
+        stories: "https://stories.duolingo.com/api2/stories",
+        users: "https://www.duolingo.com/2017-06-30/users",
+        sessions: "https://www.duolingo.com/2017-06-30/sessions",
+        leaderboards: "https://duolingo-leaderboards-prod.duolingo.com/leaderboards/7d9f5dd1-8423-491a-91f2-2532052038ce",
+        shop: "https://www.duolingo.com/2023-05-23/shop-items",
+        goals: "https://goals-api.duolingo.com"
+    },
+    defaults: {
+        delays: { xp: 100, gem: 500, streak: 100, quest: 100, league: 100 },
+        leagueBuffer: 60,
+        fakeMax: false,
+        notifPos: "bl"
+    },
+    chBody: [
+        "assist", "characterIntro", "characterMatch", "characterPuzzle", "characterSelect",
+        "characterTrace", "characterWrite", "completeReverseTranslation", "definition", "dialogue",
+        "extendedMatch", "extendedListenMatch", "form", "freeResponse", "gapFill", "judge", "listen",
+        "listenComplete", "listenMatch", "match", "name", "listenComprehension", "listenIsolation",
+        "listenSpeak", "listenTap", "orderTapComplete", "partialListen", "partialReverseTranslate",
+        "patternTapComplete", "radioBinary", "radioImageSelect", "radioListenMatch",
+        "radioListenRecognize", "radioSelect", "readComprehension", "reverseAssist", "sameDifferent",
+        "select", "selectPronunciation", "selectTranscription", "svgPuzzle", "syllableTap",
+        "syllableListenTap", "speak", "tapCloze", "tapClozeTable", "tapComplete", "tapCompleteTable",
+        "tapDescribe", "translate", "transliterate", "transliterationAssist", "typeCloze",
+        "typeClozeTable", "typeComplete", "typeCompleteTable", "writeComprehension"
+    ]
+};
+
+const desc = {
+    dash: "Overview of usage statistics, recent activity, and profile details in one place",
+    xp: "Earn any amount of XP by looping a story",
+    gem: "Obtain unlimited Gems by loop-claiming a reward; each loop grants 60 Gems",
+    streak: "Restore or extend your streak by backfilling days",
+    league: "Reach any league position you desire by automatically overtaking opponents",
+    quest: "Instantly complete quests by injecting 2000 units of progress (Brute Force)",
+    shop: "Acquire Duolingo store items for free",
+    misc: "Unlock premium features and other utilities",
+    settings: "Adjust your preferences and customize your experience"
+};
+
+const assets = {
+    logo: "https://raw.githubusercontent.com/OracleMythix/DuoRain-BETA/main/assets/DuoRain.png",
+    titleSvg: `<svg class="logo-text-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 70"><defs><linearGradient id="skyGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1bc2f5ff"/><stop offset="100%" stop-color="#07f"/></linearGradient><linearGradient id="shallowWater" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0077ffff" stop-opacity=".8"/><stop offset="100%" stop-color="#06f" stop-opacity=".9"/></linearGradient><linearGradient id="deepSea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0040ff"/><stop offset="100%" stop-color="#000530"/></linearGradient><filter id="neonGlow"><feDropShadow dx="0" dy="0" stdDeviation="3.5" flood-color="#00C6FF" flood-opacity="0.9"/></filter><filter id="diffuseFilter" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="3"/></filter><text id="textRef" style="font-family: 'Fugaz One', cursive" font-size="52" letter-spacing="0" x="96" y="52">Rain</text><path id="organicWave" d="m0 40 3.39.69 3.39.52 3.39.3 3.39.04 3.39-.21 3.39-.42 3.39-.57 3.39-.62 3.39-.59 3.39-.48 3.39-.29 3.39-.09 3.39.13 3.39.29 3.39.41 3.39.44 3.39.41 3.39.31 3.39.16 3.39.03 3.39-.11 3.39-.2 3.39-.23 3.39-.2 3.39-.13 3.39-.02 3.39.07 3.39.14 3.39.16 3.38.1 3.39-.02 3.39-.21 3.39-.44 3.39-.66 3.39-.87 3.39-1.02 3.39-1.08 3.39-1.04 3.39-.9 3.39-.7 3.39-.44 3.39-.17 3.39.1 3.39.31 3.39.45 3.39.52 3.39.51 3.39.46 3.39.37 3.39.29 3.39.24 3.39.23 3.39.27 3.39.36 3.39.49 3.39.62 3.39.72 3.39.79L200 40v60H0Z"/><mask id="rainMask"><use href="#textRef" fill="#fff"/></mask></defs><text x="2" y="52" fill="#fff" filter="url(#neonGlow)" style="font-family: 'Fugaz One', cursive" font-size="52" letter-spacing="0">Duo</text><g filter="url(#neonGlow)"><g mask="url(#rainMask)"><path fill="url(#skyGradient)" d="M0 0h260v70H0z"/><g filter="url(#diffuseFilter)"><g transform="translate(-40)"><animateTransform attributeName="transform" type="translate" values="-40 0; 160 0" dur="4.2s" repeatCount="indefinite"/><use href="#organicWave" x="-200" fill="url(#shallowWater)"/><use href="#organicWave" fill="url(#shallowWater)"/><use href="#organicWave" x="200" fill="url(#shallowWater)"/></g><g><animateTransform attributeName="transform" type="translate" values="0 0; 200 0" dur="4s" repeatCount="indefinite"/><use href="#organicWave" x="-200" fill="url(#deepSea)"/><use href="#organicWave" fill="url(#deepSea)"/><use href="#organicWave" x="200" fill="url(#deepSea)"/></g></g></g></g></svg>`,
+    xp: "https://d35aaqx5ub95lt.cloudfront.net/images/profile/01ce3a817dd01842581c3d18debcbc46.svg",
+    gems: "https://d35aaqx5ub95lt.cloudfront.net/images/gems/45c14e05be9c1af1d7d0b54c6eed7eee.svg",
+    streak: "https://d35aaqx5ub95lt.cloudfront.net/images/icons/398e4298a3b39ce566050e5c041949ef.svg",
+    league: "https://d35aaqx5ub95lt.cloudfront.net/vendor/ca9178510134b4b0893dbac30b6670aa.svg",
+    quest: "https://d35aaqx5ub95lt.cloudfront.net/vendor/7ef36bae3f9d68fc763d3451b5167836.svg",
+    shop: "https://d35aaqx5ub95lt.cloudfront.net/vendor/0e58a94dda219766d98c7796b910beee.svg",
+    chest: "https://d35aaqx5ub95lt.cloudfront.net/images/goals/64d0bbcd8f4e6d5018502540f1e0094b.svg",
+    misc: "https://d35aaqx5ub95lt.cloudfront.net/images/legendary/158dbe277bf83116d04692b969a27aa3.svg",
+    icons: {
+        dash: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>`,
+        settings: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
+        close: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+        refresh: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`,
+        arrow: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:middle;margin:0 6px;color:var(--wolf)"><line x1="3" y1="12" x2="21" y2="12"></line><polyline points="14 5 21 12 14 19"></polyline></svg>`,
+        chevLeft: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><polyline points="15 18 9 12 15 6"></polyline></svg>`,
+        chevRight: `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
+        manage: `<svg viewBox="0 0 16 16" fill="currentColor" style="width:16px;height:16px;"><path d="M8.57031 7.85938C8.57031 8.24219 8.4375 8.5625 8.10938 8.875L2.20312 14.6641C1.96875 14.8984 1.67969 15.0156 1.33594 15.0156C0.648438 15.0156 0.0859375 14.4609 0.0859375 13.7734C0.0859375 13.4219 0.226562 13.1094 0.484375 12.8516L5.63281 7.85156L0.484375 2.85938C0.226562 2.60938 0.0859375 2.28906 0.0859375 1.94531C0.0859375 1.26562 0.648438 0.703125 1.33594 0.703125C1.67969 0.703125 1.96875 0.820312 2.20312 1.05469L8.10938 6.84375C8.42969 7.14844 8.57031 7.46875 8.57031 7.85938Z"/></svg>`
+    },
+    shopIcons: {
+        xp: "https://d35aaqx5ub95lt.cloudfront.net/images/icons/68c1fd0f467456a4c607ecc0ac040533.svg",
+        streak: "https://d35aaqx5ub95lt.cloudfront.net/images/icons/216ddc11afcbb98f44e53d565ccf479e.svg",
+        heart: "https://d35aaqx5ub95lt.cloudfront.net/images/hearts/547ffcf0e6256af421ad1a32c26b8f1a.svg",
+        gem: "https://d35aaqx5ub95lt.cloudfront.net/images/gems/45c14e05be9c1af1d7d0b54c6eed7eee.svg",
+        outfit: "https://d35aaqx5ub95lt.cloudfront.net/vendor/0cecd302cf0bcd0f73d51768feff75fe.svg",
+        free: "https://d35aaqx5ub95lt.cloudfront.net/images/super/11db6cd6f69cb2e3c5046b915be8e669.svg",
+        misc: "https://d35aaqx5ub95lt.cloudfront.net/images/leagues/9fadb349c2ece257386a0e576359c867.svg"
+    }
+};
+
+let GlobalNotif;
+let GlobalPopup;
+let GlobalConfirm;
+
+const CSS = `@import url('https://fonts.googleapis.com/css2?family=Fugaz+One&display=swap');@import url('https://fonts.googleapis.com/css2?family=Google+Sans+Code:wght@400;500;600;700&display=swap');@import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@700;800&display=swap');@font-face{font-family:'DuoFeather';src:url('https://d35aaqx5ub95lt.cloudfront.net/fonts/642e24bb0295f3aee4dedcd8eecd8007.woff2') format('woff2');font-weight:700}#${config.id.app}{--rain:0,198,255;--rain-hex:#00C6FF;--shadow:0 20px 60px rgba(0,0,0,0.35);--glass:blur(25px) saturate(120%);--close:rgba(255,255,255,0.2)}#${config.id.app}.dr-light{--bg:rgba(138,138,255,0.7);--sidebar:rgba(92,92,255,0.85);--input:rgba(46,46,255,0.65);--hover:rgba(46,46,255,0.4);--dropdown-bg:rgba(46,46,255,0.95);--eel:#FFFFFF;--wolf:#E0E0E0;--swan:rgba(255,255,255,0.2)}#${config.id.app}.dr-dark{--bg:rgba(15,23,42,0.85);--sidebar:rgba(30,41,59,0.9);--input:rgba(51,65,85,0.6);--hover:rgba(71,85,105,0.5);--dropdown-bg:rgba(15,23,42,0.95);--eel:#FFFFFF;--wolf:#94A3B8;--swan:rgba(255,255,255,0.1)}#${config.id.app}{position:fixed;inset:0;pointer-events:none;z-index:2147483647;font-family:'DuoFeather',sans-serif;box-sizing:border-box;user-select:none;-webkit-user-select:none}#${config.id.app} *{box-sizing:border-box}#${config.id.orb}{position:fixed;bottom:30px;left:30px;width:68px;height:68px;pointer-events:auto;cursor:pointer;border-radius:50%;box-shadow:0 10px 30px rgba(0,0,0,.3);transition:transform .3s cubic-bezier(.34,1.56,.64,1);display:flex;align-items:center;justify-content:center;background:var(--bg);border:2px solid var(--swan);backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);overflow:hidden}#${config.id.orb}:hover{transform:scale(1.1)}#${config.id.orb} img{width:100%;height:100%;object-fit:contain;border-radius:50%;pointer-events:none}#${config.id.win}{position:fixed;pointer-events:auto;width:${config.dim.width}px;height:${config.dim.height}px;top:calc(50vh - ${config.dim.height/2}px);left:calc(50vw - ${config.dim.width/2}px);background:var(--bg);border:1px solid var(--swan);border-radius:28px;box-shadow:var(--shadow);backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);display:flex;flex-direction:row;transition:filter .3s, opacity .3s,transform .3s cubic-bezier(.2,0,0,1);overflow:hidden}#${config.id.win}.mini{opacity:0;transform:scale(.9) translateY(30px);pointer-events:none}.sidebar{width:240px;background:var(--sidebar);border-right:1px solid var(--swan);border-radius:28px 0 0 28px;display:flex;flex-direction:column;padding:25px 16px;position:relative}.header-lock{display:flex;align-items:center;justify-content:flex-start;padding-left:6px;padding-bottom:12px;cursor:grab;gap:0}.header-lock:active{cursor:grabbing}.logo-img{width:38px;height:38px;margin-right:10px;border-radius:50%;object-fit:contain;filter:drop-shadow(0 4px 6px rgba(0,0,0,.15))}.logo-text-svg{height:45px;width:auto;margin-left:-4px;margin-top:2px;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.1))}.nav-list{flex:1;display:flex;flex-direction:column;gap:6px;position:relative}.magic-pill{position:absolute;left:0;top:0;width:4px;height:50px;background:var(--rain-hex);border-radius:0 4px 4px 0;box-shadow:0 0 15px var(--rain-hex);transition:transform .25s cubic-bezier(.3,0,.2,1)}.nav-btn{display:flex;align-items:center;gap:14px;padding:12px 20px;width:100%;text-align:left;background:0 0;border:none;border-radius:14px;color:var(--wolf);font-size:16px;font-weight:700;cursor:pointer;transition:.15s}.nav-btn:hover{background:var(--hover);color:var(--eel)}.nav-btn.active{color:var(--eel)}.nav-btn img{width:28px;height:28px;transition:transform .2s}.nav-btn svg{width:26px;height:26px;stroke:currentColor;transition:transform .2s}.nav-btn:hover img,.nav-btn:hover svg{transform:scale(1.1)}.main-view{flex:1;display:flex;flex-direction:column;position:relative;overflow:hidden}.top-panel{height:75px;display:flex;align-items:center;justify-content:space-between;padding:0 30px;border-bottom:1px solid var(--swan);cursor:grab;z-index:10}.top-panel:active{cursor:grabbing}.header-title-group{display:flex;align-items:center;gap:12px;color:var(--eel)}.header-icon-box{display:flex;align-items:center;justify-content:center;width:32px;height:32px}.header-icon-box img{width:100%;height:100%;object-fit:contain}.header-icon-box svg{width:28px;height:28px;stroke:var(--eel)}.header-text-col{display:flex;flex-direction:column;justify-content:center}.title{font-size:20px;font-weight:700;color:var(--eel);line-height:1.2}.subtitle{font-size:13px;font-weight:500;color:var(--wolf);line-height:1.2}.close-btn{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--wolf);transition:.2s;cursor:pointer}.close-btn:hover{background:var(--close);color:#FF4B4B}.close-btn svg{width:24px;height:24px}.scroller{flex:1;position:relative;padding:0;overflow-y:auto;user-select:text;-webkit-user-select:text}.scroller.no-scroll{overflow:hidden!important}.page{width:100%;padding:25px;opacity:0;transform:translateY(10px);transition:.2s ease-out;display:none}.page.active{opacity:1;transform:none;display:block;position:relative}.card{background:var(--input);border:1px solid var(--swan);border-radius:20px;padding:25px;margin-bottom:20px}.label{display:block;margin-bottom:10px;font-size:13px;font-weight:800;text-transform:uppercase;color:var(--wolf)}.input-group{display:flex;gap:10px;align-items:center}.input{flex:1;padding:14px 18px;border-radius:14px;background:var(--hover);border:2px solid var(--swan);color:var(--eel);font-weight:700;font-size:16px;outline:0;transition:.2s}.input:focus{border-color:var(--rain-hex);box-shadow:0 0 0 4px rgba(0,198,255,.15)}.input[type=number]::-webkit-inner-spin-button,.input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}.btn{padding:14px 25px;border-radius:14px;background:linear-gradient(135deg,#00C6FF 0%,#0072FF 100%);color:#fff;border:none;font-size:15px;font-weight:800;text-transform:uppercase;cursor:pointer;box-shadow:0 8px 25px rgba(0,110,255,.25);transition:all .3s ease;letter-spacing:1px;white-space:nowrap}.btn:active{transform:scale(.98)}.btn:hover{filter:brightness(1.1)}.btn.disabled{filter:grayscale(1);cursor:not-allowed;transform:none}.btn.stop{background:linear-gradient(135deg, #FF4B4B 0%, #FF0000 100%);box-shadow:0 8px 25px rgba(255, 0, 0, 0.25)}.btn-got{background:linear-gradient(135deg,#2ecc71 0%,#26a65b 100%)!important;box-shadow:0 0 15px #2ecc71!important;color:#fff!important;border:none!important;pointer-events:none}.status-box{position:relative;background:rgba(0,0,0,0.4);color:#00ff9d;border-radius:14px;border:1px solid var(--swan);margin-bottom:15px;min-height:auto;overflow:hidden;display:flex;flex-direction:column}.status-content{padding:15px 20px;position:relative;z-index:2;font-family:'Google Sans Code','Consolas',monospace;font-size:14px;line-height:1.45}.progress-overlay{position:absolute;bottom:0;left:0;height:5px;width:0%;background:linear-gradient(90deg,#00C6FF,#0072FF);transition:width .3s ease;z-index:1;box-shadow:0 -2px 10px rgba(0,198,255,.5)}.scroller::-webkit-scrollbar{width:6px}.scroller::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:3px}._profile_card{background:var(--input);border:1px solid var(--swan);border-radius:20px;padding:25px;margin-bottom:20px}._profile_header{display:flex;align-items:center;gap:15px;margin-bottom:20px}._avatar{width:56px;height:56px;background:linear-gradient(135deg,#00C6FF 0%,#0072FF 100%);border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;box-shadow:0 8px 20px rgba(0,110,255,.25);overflow:hidden;position:relative}._profile_info{flex:1}._profile_info h2{font-size:20px;font-weight:700;color:var(--eel);margin:0 0 4px}._profile_info p{color:var(--wolf);font-size:14px;margin:0}._icon_btn{width:36px;height:36px;border:none;background:var(--hover);border:1px solid var(--swan);border-radius:10px;color:var(--wolf);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}._icon_btn:hover{background:rgba(0,198,255,.2);color:#0072FF;border-color:rgba(0,198,255,.3)}._icon_btn svg{width:20px;height:20px;stroke:currentColor}._stats_row{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}._stat_item{display:flex;align-items:center;gap:12px;padding:15px;background:var(--hover);border-radius:14px;border:1px solid var(--swan)}._stat_img{width:32px;height:32px;object-fit:contain}._stat_info{display:flex;flex-direction:column}._stat_value{font-size:18px;font-weight:700;color:var(--eel)}._stat_label{font-size:12px;color:var(--wolf)}._profile_status_row{display:flex;align-items:center;gap:10px;margin-bottom:6px}._status_label{font-size:12px;font-weight:800;color:var(--wolf);min-width:55px}.toggle-switch{position:relative;width:40px;height:22px}.toggle-input{opacity:0;width:0;height:0}.toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background-color:var(--swan);transition:.3s;border-radius:22px}.toggle-slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background-color:white;transition:.3s;border-radius:50%}.toggle-input:checked+.toggle-slider{background:linear-gradient(135deg,#00C6FF 0%,#0072FF 100%)}.toggle-input:checked+.toggle-slider:before{transform:translateX(18px)}.row-group{display:flex;gap:20px}.card.half{flex:1;margin-bottom:20px;display:flex;flex-direction:column}.big-stat-text,.big-rank{font-size:54px;font-weight:800;color:var(--eel);line-height:1;margin-top:10px;background:linear-gradient(120deg,#33F9FF 0%,#00C6FF 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-family:'Source Code Pro',monospace}.c-select{position:relative;width:100%;font-family:inherit}.c-select-trigger{padding:14px 18px;border-radius:14px;background:var(--hover);border:2px solid var(--swan);color:var(--eel);font-weight:700;font-size:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:.2s;user-select:none}.c-select-trigger:hover{background:var(--input)}.c-select.open .c-select-trigger{border-color:var(--rain-hex);box-shadow:0 0 0 4px rgba(0,198,255,.15)}.c-arrow{width:16px;height:16px;stroke:var(--wolf);transition:transform .3s}.c-select.open .c-arrow{transform:rotate(180deg)}.c-options{position:absolute;top:calc(100% + 8px);left:0;right:0;background:var(--dropdown-bg);border:1px solid var(--swan);border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.2);overflow:hidden;z-index:100;opacity:0;visibility:hidden;transform:translateY(-10px);transition:all .2s cubic-bezier(.2,0,.2,1);max-height:220px;overflow-y:auto;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);scrollbar-width:none;-ms-overflow-style:none}.c-options::-webkit-scrollbar{width:0;height:0;display:none}.c-select.open .c-options{opacity:1;visibility:visible;transform:translateY(0)}.c-option{padding:12px 18px;cursor:pointer;font-weight:600;color:var(--wolf);transition:background .1s;display:flex;align-items:center}.c-option:hover{background:rgba(0,198,255,.1);color:var(--eel)}.c-option.selected{background:linear-gradient(90deg,rgba(0,198,255,.1),transparent);color:#00C6FF}.search-bar{width:100%;padding:14px 18px;border-radius:14px;background:var(--hover);border:2px solid var(--swan);color:var(--eel);font-weight:700;font-size:16px;outline:0;transition:.2s;margin-bottom:20px}.search-bar:focus{border-color:var(--rain-hex);box-shadow:0 0 0 4px rgba(0,198,255,.15)}.category-header{font-size:14px;font-weight:800;text-transform:uppercase;color:var(--wolf);margin:20px 0 10px;text-align:center;position:relative}.category-header::before,.category-header::after{content:'';position:absolute;top:50%;width:30%;height:1px;background:var(--swan)}.category-header::before{left:0}.category-header::after{right:0}.shop-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));gap:12px;margin-bottom:10px}.shop-item{background:var(--hover);border:1px solid var(--swan);border-radius:16px;padding:15px;display:flex;flex-direction:column;align-items:center;text-align:center;transition:.2s;min-height:140px;justify-content:space-between}.shop-item:hover{transform:translateY(-2px);border-color:var(--rain-hex)}.item-icon{width:42px;height:42px;margin-bottom:10px;object-fit:contain}.item-name{font-size:13px;font-weight:700;color:var(--eel);line-height:1.2;margin-bottom:10px;flex:1;display:flex;align-items:center;justify-content:center}.item-btn{width:100%;padding:8px;border-radius:10px;background:var(--input);border:1px solid var(--swan);color:var(--wolf);font-size:11px;font-weight:800;cursor:pointer;transition:.2s}.item-btn:hover{background:var(--rain-hex);color:#fff;border-color:var(--rain-hex)}.item-btn.buying{pointer-events:none}.item-btn.success{background:#2ecc71;color:#fff;border-color:#2ecc71}.shop-search-row{display:flex;gap:10px;align-items:center;margin-bottom:20px}.shop-reload-btn{width:50px;height:50px;flex-shrink:0;border-radius:14px;background:var(--hover);border:2px solid var(--swan);color:var(--wolf);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}.shop-reload-btn:hover{background:var(--input);color:var(--rain-hex);border-color:var(--rain-hex)}.shop-empty-state{text-align:center;padding:30px;color:var(--wolf);display:none;animation:fadeIn .3s}.shop-empty-img{width:64px;height:64px;margin-bottom:15px;opacity:.6;filter:grayscale(1);object-fit:contain}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.quest-filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:5px;margin-top:10px}.quest-filter-btn{padding:8px 16px;border-radius:14px;background:var(--hover);border:2px solid var(--swan);color:var(--wolf);font-weight:700;font-size:12px;cursor:pointer;transition:.2s;white-space:nowrap}.quest-filter-btn:hover{background:var(--input)}.quest-filter-btn.active{background:var(--rain-hex);color:#fff;border-color:var(--rain-hex)}.quest-item{display:flex;align-items:center;padding:15px;background:var(--hover);border:1px solid var(--swan);border-radius:16px;margin-bottom:10px;transition:.2s}.quest-item:hover{border-color:var(--rain-hex);transform:translateY(-2px)}.quest-item.completed{border-left:4px solid #2ecc71}.quest-item.warning{border-left:4px solid #f1c40f}.quest-icon{width:48px;height:48px;object-fit:contain;margin-right:15px}.quest-info{flex:1}.quest-title{font-size:14px;font-weight:700;color:var(--eel);margin-bottom:4px}.quest-meta{font-size:11px;color:var(--wolf);margin-bottom:6px;font-family:'Google Sans Code',monospace}.quest-progress-row{display:flex;justify-content:space-between;font-size:11px;font-weight:700;color:var(--wolf);margin-bottom:4px}.quest-bar-bg{height:8px;background:var(--swan);border-radius:4px;overflow:hidden}.quest-bar-fill{height:100%;background:var(--rain-hex);width:0%;border-radius:4px;transition:width .5s}.quest-item.completed .quest-bar-fill{background:#2ecc71}.quest-actions{display:flex;gap:6px;margin-left:10px;flex-direction:column}.q-mini-btn{padding:6px 10px;border-radius:8px;background:var(--input);border:1px solid var(--swan);color:var(--wolf);font-size:10px;font-weight:800;cursor:pointer;transition:.2s;min-width:60px;text-align:center}.q-mini-btn:hover{background:var(--rain-hex);color:#fff;border-color:var(--rain-hex)}.q-mini-btn.finish{background:linear-gradient(135deg,#f1c40f 0%,#f39c12 100%);color:#fff;border:none}.q-mini-btn.finish:hover{filter:brightness(1.1)}.quest-header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.dash-row{display:flex;gap:15px;margin-top:15px}.dash-card{flex:1;background:var(--input);border:1px solid var(--swan);border-radius:16px;padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;text-align:center;position:relative;min-height:220px}.carousel-nav{position:absolute;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--wolf);width:28px;height:28px;background:var(--hover);border-radius:50%;display:flex;align-items:center;justify-content:center;transition:.2s;z-index:5}.carousel-nav:hover{background:var(--swan);color:var(--eel);transform:translateY(-50%) scale(1.1)}.nav-left{left:10px}.nav-right{right:10px}.q-img{width:60px;height:60px;margin:10px 0;object-fit:contain;filter:drop-shadow(0 4px 6px rgba(0,0,0,0.1))}.q-head{font-size:14px;font-weight:800;color:var(--wolf);text-transform:uppercase}.q-text{font-size:13px;font-weight:600;color:var(--eel);margin-bottom:10px;min-height:18px}.q-btn{padding:8px 20px;border-radius:10px;background:linear-gradient(135deg,#00C6FF 0%,#0072FF 100%);color:#fff;border:none;font-size:12px;font-weight:800;cursor:pointer;transition:.2s}.q-btn:hover{filter:brightness(1.1);transform:scale(1.05)}.q-btn.done{background:none;color:#2ecc71;border:none;pointer-events:none;font-size:14px}.dr-spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:dr-spin .6s linear infinite;display:inline-block;vertical-align:middle;margin-left:5px}@keyframes dr-spin{to{transform:rotate(360deg)}}.task-item{display:flex;align-items:center;justify-content:space-between;padding:10px;background:var(--hover);border:1px solid var(--swan);border-radius:10px;margin-bottom:8px;width:100%}.task-info{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--eel)}.mini-stop{background:linear-gradient(135deg, #FF4B4B 0%, #FF0000 100%);color:#fff;font-size:10px;font-weight:800;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;box-shadow:0 2px 5px rgba(255,0,0,0.3);transition:.2s}.mini-stop:hover{transform:scale(1.05)}.mini-stop.close{background:var(--hover);color:var(--wolf);box-shadow:none;border:1px solid var(--swan);padding:5px 8px}.mini-stop.close:hover{background:var(--close);color:#FF4B4B}.interrupted-text{color:#FF4B4B;font-size:11px;font-weight:700;margin-right:5px;display:flex;align-items:center;gap:4px}.dr-notif-container{position:fixed;z-index:2147483650;padding:20px;display:flex;gap:10px;pointer-events:none;transition:all .3s}.pos-bl{bottom:0;left:0;align-items:flex-start;flex-direction:column-reverse}.pos-br{bottom:0;right:0;align-items:flex-end;flex-direction:column-reverse}.pos-c{bottom:0;left:50%;transform:translateX(-50%);align-items:center;flex-direction:column-reverse}.dr-notification{position:relative;background:var(--dropdown-bg);border:1px solid var(--swan);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:15px 25px;border-radius:24px;display:flex;align-items:center;gap:15px;box-shadow:0 15px 40px rgba(0,0,0,0.35);pointer-events:auto;min-width:300px;max-width:380px;transition:all .4s cubic-bezier(.16,1,.3,1);transform-origin:center;opacity:0;transform:scale(.9) translateY(20px);max-height:0;margin:0;overflow:hidden}.dr-notif-close{position:absolute;top:-8px;right:-8px;width:24px;height:24px;background:var(--input);border:1px solid var(--swan);border-radius:50%;color:var(--wolf);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;font-weight:700;opacity:0;transition:.2s;box-shadow:0 4px 10px rgba(0,0,0,0.2)}.dr-notification:hover .dr-notif-close{opacity:1;top:-10px;right:-10px}.dr-notif-close:hover{background:#FF4B4B;color:#fff;border-color:#FF4B4B}.dr-notif-icon{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#00C6FF,#0072FF);display:flex;align-items:center;justify-content:center;flex-shrink:0}.dr-notif-icon img{width:100%;height:100%;object-fit:contain;border-radius:50%}.dr-notif-content{display:flex;flex-direction:column}.dr-notif-title{color:var(--eel);font-weight:800;font-size:16px;line-height:1.2}.dr-notif-desc{color:var(--wolf);font-size:13px;font-weight:600;margin-top:3px;font-family:'Google Sans Code',monospace}.dr-notification.show{opacity:1;transform:scale(1) translateY(0);max-height:150px;margin-top:10px}.pos-bl .dr-notification.hiding{opacity:0;transform:translateX(-100%) scale(.9);max-height:0!important;margin-top:0!important;padding-top:0!important;padding-bottom:0!important;border:none!important}.pos-br .dr-notification.hiding{opacity:0;transform:translateX(100%) scale(.9);max-height:0!important;margin-top:0!important;padding-top:0!important;padding-bottom:0!important;border:none!important}.pos-c .dr-notification.hiding{opacity:0;transform:translateY(30px) scale(.8);max-height:0!important;margin-top:0!important;padding-top:0!important;padding-bottom:0!important;border:none!important}.dr-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.1);backdrop-filter:blur(15px);z-index:2147483648;display:none;align-items:center;justify-content:center;opacity:0;transition:.3s}.dr-modal-overlay.active{opacity:1;display:flex}.dr-modal{background:var(--bg);border:1px solid var(--swan);padding:30px;border-radius:24px;width:90%;max-width:400px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);transform:scale(0.9);transition:.3s}.dr-modal .header-icon-box img{border-radius:50%}.dr-modal-overlay.active .dr-modal{transform:scale(1)}.dr-modal-actions{display:flex;gap:10px;margin-top:20px;justify-content:center}.dr-modal-btn-sec{background:transparent;border:2px solid var(--swan);color:var(--wolf);padding:12px 20px;border-radius:12px;font-weight:700;cursor:pointer;transition:.2s}.dr-modal-btn-sec:hover{border-color:var(--rain-hex);color:var(--eel)}[data-dr-tip]{position:relative}[data-dr-tip]:hover::after{content:attr(data-dr-tip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);padding:6px 10px;background:var(--dropdown-bg);color:var(--eel);border:1px solid var(--swan);border-radius:8px;font-size:12px;font-weight:700;white-space:nowrap;pointer-events:none;box-shadow:0 5px 15px rgba(0,0,0,0.1);margin-bottom:10px;z-index:100;backdrop-filter:blur(10px)}.ac-preview{display:flex;align-items:center;gap:10px;margin:15px 0;background:var(--hover);padding:10px;border-radius:12px;text-align:left}.ac-prev-img{width:40px;height:40px;border-radius:50%;object-fit:cover}.acc-user-card{background:var(--hover);border-radius:14px;border:1px solid var(--swan);padding:15px;display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;transition:.2s}.acc-user-card:hover{border-color:var(--rain-hex)}.acc-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0}.acc-info{flex:1;display:flex;flex-direction:column}.acc-name{color:var(--eel);font-weight:700;font-size:15px}.acc-desc{color:var(--wolf);font-size:12px}.acc-manage-btn{width:100%;margin-top:10px;background:transparent;border:2px solid var(--swan);color:var(--wolf);padding:12px;border-radius:12px;font-weight:700;cursor:pointer;transition:.2s;display:flex;align-items:center;justify-content:center;gap:8px}.acc-manage-btn:hover{border-color:var(--rain-hex);color:var(--eel)}.acc-status-overlay{position:absolute;inset:0;background:var(--dropdown-bg);display:flex;align-items:center;justify-content:center;opacity:0;transition:.2s;cursor:pointer;backdrop-filter:blur(5px);border-radius:14px}.acc-user-card:hover .acc-status-overlay{opacity:1}.acc-status-text{font-weight:800;color:var(--eel);font-size:13px;text-transform:uppercase}.acc-login-btn{background:var(--rain-hex);color:#fff;border:none;padding:6px 14px;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer}.acc-grid{max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:20px;padding-right:4px}.acc-grid::-webkit-scrollbar{width:4px}.acc-grid::-webkit-scrollbar-thumb{background:var(--swan);border-radius:2px}.acc-item-row{display:flex;align-items:center;justify-content:space-between;background:var(--hover);padding:10px;border-radius:12px;border:1px solid var(--swan)}.acc-del-btn{width:28px;height:28px;border-radius:8px;background:var(--input);color:var(--wolf);border:1px solid var(--swan);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.2s}.acc-del-btn:hover{background:#FF4B4B;color:#fff;border-color:#FF4B4B}.acc-del-btn svg{width:16px;height:16px;stroke:currentColor}`;
+
+const HTML = `<div id="${config.id.app}" class="dr-light"><div id="dr-notif-area" class="dr-notif-container pos-bl"></div><div id="dr-modal-overlay" class="dr-modal-overlay"><div class="dr-modal"><div style="margin-bottom:20px;display:flex;justify-content:center"><div class="header-icon-box" style="width:64px;height:64px;"><img src="${assets.logo}" style="width:100%;height:100%"></div></div><h3 id="dr-modal-title" style="color:var(--eel);font-size:24px;margin:0 0 10px">Alert</h3><div id="dr-modal-content"><p id="dr-modal-msg" style="color:var(--wolf);font-size:16px;line-height:1.5;margin:0 0 25px"></p></div><div id="dr-modal-actions" class="dr-modal-actions"><button class="btn" id="dr-modal-btn" style="width:100%">OKAY</button></div></div></div><div id="${config.id.orb}"><img src="${assets.logo}" draggable="false"></div><div id="${config.id.win}"><div class="sidebar"><div class="header-lock drag"><img src="${assets.logo}" class="logo-img">${assets.titleSvg}</div><div class="nav-list"><div class="magic-pill"></div><button class="nav-btn active" data-id="dash">${assets.icons.dash}<span>Dashboard</span></button><button class="nav-btn" data-id="xp"><img src="${assets.xp}"><span>XP Farm</span></button><button class="nav-btn" data-id="gem"><img src="${assets.gems}"><span>Gem Farm</span></button><button class="nav-btn" data-id="streak"><img src="${assets.streak}"><span>Streak Farm</span></button><button class="nav-btn" data-id="league"><img src="${assets.league}"><span>League Saver</span></button><button class="nav-btn" data-id="quest"><img src="${assets.quest}"><span>Quests</span></button><button class="nav-btn" data-id="shop"><img src="${assets.shop}"><span>Shop</span></button><button class="nav-btn" data-id="misc"><img src="${assets.misc}" style="width:26px;height:26px;"><span>Miscellaneous</span></button><button class="nav-btn" data-id="settings">${assets.icons.settings}<span>Settings</span></button></div></div><div class="main-view"><div class="top-panel drag"><div class="header-title-group"><div class="header-icon-box" id="dr-header-icon">${assets.icons.dash}</div><div class="header-text-col"><span class="title" id="dr-title">Dashboard</span><span class="subtitle" id="dr-subtitle">${desc.dash}</span></div></div><div class="close-btn" id="dr-close">${assets.icons.close}</div></div><div class="scroller"><div class="page active" id="pg-dash"><div class="_profile_card"><div class="_profile_header"><div class="_avatar"><span style="font-size: 28px;">👤</span></div><div class="_profile_info"><h2 id="_username">Loading...</h2><div class="_profile_status_row"><span id="_privacy_label" class="_status_label">...</span><label class="toggle-switch"><input type="checkbox" id="_privacy_toggle" class="toggle-input"><span class="toggle-slider"></span></label></div><p id="_user_details">Fetching data...</p></div><button id="_refresh_profile" class="_icon_btn" data-dr-tip="Refresh Profile">${assets.icons.refresh}</button></div><div class="_stats_row"><div class="_stat_item"><img src="${assets.xp}" class="_stat_img"><div class="_stat_info"><span class="_stat_value" id="_current_xp">0</span><span class="_stat_label">Total XP</span></div></div><div class="_stat_item"><img src="${assets.streak}" class="_stat_img"><div class="_stat_info"><span class="_stat_value" id="_current_streak">0</span><span class="_stat_label">Streak</span></div></div><div class="_stat_item"><img src="${assets.gems}" class="_stat_img"><div class="_stat_info"><span class="_stat_value" id="_current_gems">0</span><span class="_stat_label">Gems</span></div></div></div></div><div class="dash-row"><div class="dash-card" id="dash-quest-card"><div class="carousel-nav nav-left" id="dq-left">${assets.icons.chevLeft}</div><div class="q-head" id="dq-head">DAILY QUESTS</div><img src="${assets.chest}" class="q-img" id="dq-img"><div class="q-text" id="dq-text">Checking status...</div><button class="q-btn" id="dq-btn">FINISH</button><div class="carousel-nav nav-right" id="dq-right">${assets.icons.chevRight}</div></div><div class="dash-card" id="dash-league-card" style="align-items:flex-start; text-align:left; justify-content:flex-start"><div id="dash-card-content" style="width:100%;height:100%;display:flex;flex-direction:column;align-items:flex-start;"><span class="label" style="margin-bottom:5px">INFO</span><div style="color:var(--eel); font-weight:600">Current League Position</div><div class="big-rank" id="dq-rank" style="margin-top:10px">...</div><div class="q-text" id="dq-league-xp" style="margin-top:auto; align-self:flex-start; color:var(--wolf)">... XP</div></div></div></div><div class="card" id="dash-acc-card" style="margin-top:20px"><span class="label" style="font-size:16px;">ACCOUNTS</span><p style="color:var(--wolf); font-size:13px; margin:0 0 15px 0;">Manage your Duolingo accounts and switch between them effortlessly.</p><div id="acc-current-card" class="acc-user-card" style="margin-bottom:15px"></div><button class="acc-manage-btn" id="acc-open-menu">Account Management Menu ${assets.icons.manage}</button></div></div><div class="page" id="pg-xp"><div class="card"><span class="label">Configuration</span><div style="margin-bottom:5px; color:var(--eel); font-weight:600">Enter amount of XP to farm</div><div class="input-group"><input type="number" id="xp-input" class="input" value="100" min="30" step="1" onkeypress="return event.charCode >= 48 && event.charCode <= 57"><button class="btn" id="xp-btn-run">RUN</button></div></div><div class="card"><span class="label">Status</span><div class="status-box"><div class="status-content" id="xp-status-text">STATUS: Idle<br>Target XP: none<br>Loops to run: 0<br>Loops left: 0<br>Estimated Time left: 0<br>Time taken: ...</div><div class="progress-overlay" id="xp-prog-bar"></div></div></div></div><div class="page" id="pg-gem"><div class="card"><span class="label">Configuration</span><div style="margin-bottom:5px; color:var(--eel); font-weight:600">Enter amount of Gem loops to run</div><div class="input-group"><input type="number" id="gem-input" class="input" value="10" min="1" step="1" onkeypress="return event.charCode >= 48 && event.charCode <= 57"><button class="btn" id="gem-btn-run">RUN</button></div></div><div class="card"><span class="label">Status</span><div class="status-box"><div class="status-content" id="gem-status-text">STATUS: Idle<br>Target Gems: none<br>Loops to run: 0<br>Loops left: 0<br>Estimated Time left: 0<br>Time taken: ...</div><div class="progress-overlay" id="gem-prog-bar"></div></div></div></div><div class="page" id="pg-streak"><div class="card"><span class="label">Configuration</span><div style="margin-bottom:5px; color:var(--eel); font-weight:600">Enter amount of Streak Days to restore/farm</div><div class="input-group"><input type="number" id="streak-input" class="input" value="10" min="1" step="1" onkeypress="return event.charCode >= 48 && event.charCode <= 57"><button class="btn" id="streak-btn-run">RUN</button></div></div><div class="card"><span class="label">Status</span><div class="status-box"><div class="status-content" id="streak-status-text">STATUS: Idle<br>Target Days: none<br>Days to farm: 0<br>Days left: 0<br>Estimated Time left: 0<br>Time taken: ...</div><div class="progress-overlay" id="streak-prog-bar"></div></div></div></div><div class="page" id="pg-league"><div class="row-group"><div class="card half"><span class="label">Configuration</span><div style="margin-bottom:8px; color:var(--eel); font-weight:600">Select a league position to reach</div><div class="input-group"><div id="league-select-wrapper" class="c-select" data-value="1"><div class="c-select-trigger"><span class="c-selected-text"># 1</span><svg class="c-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div><div class="c-options" id="league-options"></div></div><button class="btn" id="league-btn-run">RUN</button></div></div><div class="card half"><span class="label">Info</span><div style="color:var(--eel); font-weight:600">Current League Position</div><div class="big-stat-text" id="league-current-rank">...</div><div style="color:var(--wolf); font-weight:600; margin-top:5px" id="league-current-xp">...</div></div></div><div class="card"><span class="label">Status</span><div class="status-box"><div class="status-content" id="league-status-text">STATUS: Idle<br>Target Position: none<br>Target XP: none<br>Loops to run: 0<br>Loops left: 0<br>Estimated Time left: 0<br>Time taken: ...</div><div class="progress-overlay" id="league-prog-bar"></div></div></div></div><div class="page" id="pg-quest"><div class="card"><span class="label">Controls</span><div class="input-group"><button class="btn" id="quest-btn-claim" style="background:linear-gradient(135deg,#f1c40f 0%,#f39c12 100%)">FINISH MONTHLY</button><button id="quest-reload" class="shop-reload-btn" data-dr-tip="Reload Quests">${assets.icons.refresh}</button></div><div class="quest-filters"><button class="quest-filter-btn active" data-filter="MONTHLY">Monthly</button><button class="quest-filter-btn" data-filter="DAILY">Daily</button><button class="quest-filter-btn" data-filter="FRIENDS">Friends</button><button class="quest-filter-btn" data-filter="WEEKLY">Weekly</button><button class="quest-filter-btn" data-filter="ALL">All</button></div></div><div id="quest-container" style="padding-bottom:20px"><p style="text-align:center;color:var(--wolf);padding:20px">Loading quests...</p></div></div><div class="page" id="pg-shop"><div class="card" style="padding-bottom:10px;"><span class="label">Search</span><div class="shop-search-row"><input type="text" id="shop-search" class="search-bar" placeholder="Search items..." style="margin-bottom:0"><button id="shop-reload" class="shop-reload-btn" data-dr-tip="Reload Shop">${assets.icons.refresh}</button></div><div id="shop-container"><p style="text-align:center;color:var(--wolf);padding:20px;">Loading shop items...</p></div><div id="shop-empty" class="shop-empty-state"><img src="${assets.shopIcons.misc}" class="shop-empty-img"><h3>Nothing found?</h3><p>Try searching for something else!</p></div></div></div><div class="page" id="pg-misc"><div class="card"><span class="label">STATUS</span><div style="margin-bottom:5px; color:var(--eel); font-weight:600">FREE SUPER/MAX</div><div id="misc-desc" style="margin-bottom:15px; color:var(--wolf); font-size:13px">Activate Free Max in your account indefinitely and at no cost</div><div class="input-group"><div id="misc-super-select-wrapper" class="c-select" data-value="fake_max"><div class="c-select-trigger"><span class="c-selected-text">Free Max (Web Only)</span><svg class="c-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div><div class="c-options"><div class="c-option selected" data-value="fake_max">Free Max (Web Only)</div><div class="c-option" data-value="legit_trial">Free Super Trial (3-Days)</div></div></div><div id="misc-control-wrapper" style="display:flex;align-items:center;min-width:100px;justify-content:center;"><label class="toggle-switch" id="misc-fake-switch"><input type="checkbox" class="toggle-input"><span class="toggle-slider"></span></label><button class="btn" id="misc-btn-get" style="display:none">GET</button></div></div></div></div><div class="page" id="pg-settings"><div class="card" id="acc-save-card" style="display:none"><span class="label">ACCOUNT SAVING</span><p style="color:var(--wolf); font-size:13px; margin-bottom:10px;">Save your current account to switch back to it later easily.</p><div class="input-group"><button class="btn" id="acc-save-btn" style="width:100%">SAVE CURRENT ACCOUNT</button></div></div><div class="card"><span class="label">CUSTOMIZE NOTIFICATIONS</span><p style="color:var(--wolf); font-size:13px; margin-bottom:10px;">Modify the position of notifications</p><div class="input-group"><div id="notif-pos-wrapper" class="c-select" data-value="bl"><div class="c-select-trigger"><span class="c-selected-text">Bottom Left</span><svg class="c-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div><div class="c-options"><div class="c-option selected" data-value="bl">Bottom Left</div><div class="c-option" data-value="br">Bottom Right</div><div class="c-option" data-value="c">Center</div></div></div><button class="btn" id="notif-pos-btn">SET</button></div></div><div class="card"><span class="label">Loops Delay Control</span><p style="color:var(--wolf); font-size:13px; margin-bottom:10px;">Select a farm type to configure its loop delay (ms).</p><div style="margin-bottom:10px"><div id="set-delay-wrapper" class="c-select" data-value="xp"><div class="c-select-trigger"><span class="c-selected-text">XP Farm</span><svg class="c-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></div><div class="c-options"><div class="c-option selected" data-value="xp">XP Farm</div><div class="c-option" data-value="gem">Gem Farm</div><div class="c-option" data-value="streak">Streak Farm</div><div class="c-option" data-value="league">League Saver</div><div class="c-option" data-value="quest">Quests</div></div></div></div><div class="input-group"><input type="number" id="set-delay-input" class="input" placeholder="ms" min="0" step="1" onkeypress="return event.charCode >= 48 && event.charCode <= 57"><button class="btn" id="set-delay-btn">SET</button></div></div><div class="card"><span class="label">LEAGUE SAVER CONTROL</span><p style="color:var(--wolf); font-size:13px; margin-bottom:10px;">Choose how much extra XP you want to generate as you overtake your opponents on the leaderboard.</p><div class="input-group"><input type="number" id="set-league-buffer-input" class="input" placeholder="XP Amount (Default: 60)" min="10" step="1" onkeypress="return event.charCode >= 48 && event.charCode <= 57"><button class="btn" id="set-league-buffer-btn">SET</button></div></div></div></div></div></div></div>`;
+
+class functions {
+    constructor() {
+        this.activeTasks = new Set();
+        this.taskProgress = new Map();
+        this.taskTimers = new Map();
+        this.interruptedTasks = new Map();
+    }
+
+    installInterceptors() {
+        const fakeMax = localStorage.getItem('dr_fake_max') === 'true';
+
+        if (!fakeMax) return;
+
+        const TARGET_URL_REGEX = /https:\/\/www\.duolingo\.com\/\d{4}-\d{2}-\d{2}\/users\/.+/;
+
+        const CUSTOM_SHOP_ITEMS = {
+            gold_subscription: {
+                itemName: "gold_subscription",
+                subscriptionInfo: {
+                    vendor: "STRIPE",
+                    renewing: true,
+                    isFamilyPlan: true,
+                    expectedExpiration: 9999999999000
+                }
             }
-            else if (request.url.includes('/2017-06-30/sessions') && request.method === 'POST') {
-                try {
-                    const requestBody = await request.clone().json();
-                    const response = await originalFetch(request);
-                    if (!response.ok) return response;
-                    const data = await response.json();
- 
-                    if (requestBody.type === 'DUORADIO' || requestBody.type === 'PRACTICE_HUB_TAB_AUDIO_PLAYER') {
-                        if (data.elements) {
-                             data.elements = [{ type: "challenge", challengeType: "select", prompt: "Join DuoRain Discord!", choices: ["Sure!"], correctIndex: 0 }];
-                        }
-                    }
-                    else if (data.challenges) {
-                        const isLegendary = window.location.href.includes('/legendary');
-                        let newChallenges = [];
- 
-                        const buildNewChallenge = (originalChallenge) => ({ ...originalChallenge, ...LESSON_CHALLENGE_CONTENT });
- 
-                        if (isLegendary && data.challenges.length >= 2) {
-                            newChallenges.push(buildNewChallenge(data.challenges[0]));
-                            newChallenges.push(buildNewChallenge(data.challenges[1]));
-                        } else if (data.challenges.length > 0) {
-                            newChallenges.push(buildNewChallenge(data.challenges[0]));
-                        } else {
-                            newChallenges = data.challenges;
-                        }
-                        data.challenges = newChallenges;
-                        if (data.adaptiveChallenges) data.adaptiveChallenges = [];
-                    }
-                    return new Response(JSON.stringify(data), { status: response.status, headers: response.headers });
-                } catch (e) {console.error("DuoRain Interceptor Error (Sessions):", e);}
-            }
-            return originalFetch(request);
         };
-    })();
-    `;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
-}
- 
-let isUiHidden = false;
-let isAnimating = false;
-let settings = {};
-let loopDelay = 200;
-const raindrops = [];
- 
-function loadSettings() {
-    try {
-        const stored = localStorage.getItem('duorain_settings');
-        if (stored) {
-            settings = JSON.parse(stored);
-            if (!Array.isArray(settings.pins)) settings.pins = ['xp', 'gem'];
-            if (!Array.isArray(settings.solverPins)) settings.solverPins = ['path-solve', 'practice-solve'];
-            if (typeof settings.loopDelay !== 'number' || settings.loopDelay < 0) {
-                settings.loopDelay = 200;
-            }
-             if (typeof settings.easySolve !== 'boolean') settings.easySolve = false;
-        } else {
-            settings = { pins: ['xp', 'gem'], solverPins: ['path-solve', 'practice-solve'], loopDelay: 200, easySolve: false };
+
+        function shouldIntercept(url, method = 'GET') {
+            if (method.toUpperCase() !== 'GET') return false;
+            const urlStr = (typeof url === 'string') ? url : (url instanceof Request ? url.url : '');
+            const isMatch = TARGET_URL_REGEX.test(urlStr);
+            if (urlStr.includes('/shop-items')) return false;
+            return isMatch;
         }
-    } catch(e) {
-        settings = { pins: ['xp', 'gem'], solverPins: ['path-solve', 'practice-solve'], loopDelay: 200, easySolve: false };
-    }
-    loopDelay = settings.loopDelay;
-}
- 
-function saveSettings() {
-    localStorage.setItem('duorain_settings', JSON.stringify(settings));
-}
- 
-function getJwtToken() {
-    try {
-        const jwtMatch = document.cookie.match(/(?:^|;\s*)jwt_token=([^;]*)/);
-        return jwtMatch ? jwtMatch[1] : null;
-    } catch (e) { console.error("DuoRain Error: Failed to get JWT token.", e); return null; }
-}
- 
-function parseJwt(token) {
-    if (!token) return null;
-    try {
-        const payload = token.split('.')[1];
-        const decodedPayload = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-        return JSON.parse(decodedPayload);
-    } catch (e) { console.error("DuoRain Error: Failed to parse JWT.", e); return null; }
-}
- 
-function injectUI() {
-    const uiHTML = `
-        <div id="duorain-ui-wrapper" class="DLP_Main">
-            <div class="DLP_HStack_8" style="align-self: flex-end;">
-                 <div class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect" id="duorain-solver-button">
-                    <span id="solver-state-auto" class="duorain-button-state">
-                       <svg class="open-svg" width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4m-8-2 8-8m0 0v5m0-5h-5"/></svg>
-                       <p class="DLP_Text_Style_1 duorain-neon-glow">Auto-Solver</p>
-                    </span>
-                     <span id="solver-state-4-0" class="duorain-button-state" style="display: none;">
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.091 -2.182 24 29.455" xml:space="preserve"><defs><filter id="back-rain" x="-50%" y="-50%" width="200%" height="200%"><feFlood flood-color="hsl(210, 100%, 50%)" result="flood"/><feComposite in="flood" in2="SourceGraphic" operator="in" result="comp"/><feGaussianBlur in="comp" stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><path d="M6.268 1.13a.34.34 0 0 0-.252.068L.132 5.756v-.001l-.02.021-.022.022a.3.3 0 0 0-.065.097v.001a.3.3 0 0 0-.023.118L0 6.027l.002.013a.3.3 0 0 0 .024.118v.001q.024.054.065.096.01.012.022.022l.02.021 5.884 4.557a.341.341 0 1 0 .418-.539L1.338 6.367l12.991.001c3.777 0 6.806 3.036 6.806 6.822s-3.029 6.818-6.806 6.818l-9.11.001a.34.34 0 0 0-.242.1.34.34 0 0 0-.1.242.34.34 0 0 0 .343.34h9.11c4.143-.001 7.488-3.351 7.488-7.502s-3.345-7.504-7.489-7.504H1.34l5.095-3.948a.34.34 0 0 0 .06-.478.34.34 0 0 0-.227-.128z" fill="hsl(210, 100%, 50%)" style="filter:url(#back-rain)" stroke="hsl(210, 100%, 50%)" stroke-width="1.5" stroke-linejoin="round"/></svg>
-<p class="DLP_Text_Style_1 duorain-neon-glow">4.0</p>
-</span>
-                    </div>
-                    <div class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect" id="duorain-hide-button" style="outline: 2px solid rgba(0, 0, 0, 0.2); outline-offset: -2px; background: rgb(0, 122, 255); flex: none; backdrop-filter: blur(16px);">
-                        <svg id="hide-icon" width="23" height="16" viewBox="0 0 23 16" fill="#FFF" xmlns="http://www.w3.org/2000/svg"><path d="M17.7266 14.9922L4.1875 1.47656C3.9375 1.22656 3.9375 0.796875 4.1875 0.546875C4.44531 0.289062 4.875 0.289062 5.125 0.546875L18.6562 14.0625C18.9141 14.3203 18.9219 14.7188 18.6562 14.9922C18.3984 15.2578 17.9844 15.25 17.7266 14.9922ZM18.4609 12.4062L15.3281 9.25781C15.5 8.82812 15.5938 8.35938 15.5938 7.875C15.5938 5.57812 13.7266 3.74219 11.4375 3.74219C10.9531 3.74219 10.4922 3.83594 10.0547 3.99219L7.75 1.67969C8.875 1.3125 10.1016 1.09375 11.4297 1.09375C17.8984 1.09375 22.1172 6.28906 22.1172 7.875C22.1172 8.78125 20.7344 10.8438 18.4609 12.4062ZM11.4297 14.6562C5.05469 14.6562 0.75 9.45312 0.75 7.875C0.75 6.96094 2.16406 4.85938 4.54688 3.27344L7.59375 6.32812C7.39062 6.79688 7.27344 7.32812 7.27344 7.875C7.28125 10.1172 9.13281 12.0078 11.4375 12.0078C11.9766 12.0078 12.4922 11.8906 12.9609 11.6875L15.2812 14.0078C14.125 14.4141 12.8281 14.6562 11.4297 14.6562ZM13.9609 7.71094C13.9609 7.77344 13.9609 7.82812 13.9531 7.88281L11.3203 5.25781C11.375 5.25 11.4375 5.25 11.4922 5.25C12.8594 5.25 13.9609 6.35156 13.9609 7.71094ZM8.88281 7.82031C8.88281 7.75781 8.88281 7.6875 8.89062 7.625L11.5391 10.2734C11.4766 10.2812 11.4219 10.2891 11.3594 10.2891C10 10.2891 8.88281 9.17969 8.88281 7.82031Z"></path></svg>
-                        <svg id="show-icon" width="22" height="14" viewBox="0 0 22 14" xmlns="http://www.w3.org/2000/svg" style="display: none;"><path d="M11.2734 13.6406C4.89844 13.6406 0.59375 8.4375 0.59375 6.85156C0.59375 5.27344 4.90625 0.078125 11.2734 0.078125C17.75 0.078125 21.9688 5.27344 21.9688 6.85156C21.9688 8.4375 17.75 13.6406 11.2734 13.6406ZM11.2812 11.0078C13.5781 11.0078 15.4375 9.14844 15.4375 6.85938C15.4375 4.5625 13.5781 2.70312 11.2812 2.70312C8.98438 2.70312 7.125 4.5625 7.125 6.85938C7.125 9.14844 8.98438 11.0078 11.2812 11.0078ZM11.2812 8.49219C10.375 8.49219 9.64844 7.76562 9.64844 6.85938C9.64844 5.95312 10.375 5.22656 11.2812 5.22656C12.1875 5.22656 12.9141 5.95312 12.9141 6.85938C12.9141 7.76562 12.1875 8.49219 11.2812 8.49219Z"></path></svg>
-                        <p id="hide-show-text" class="DLP_Text_Style_1" style="color: #FFF;">Hide</p>
-                    </div>
-                </div>
-                <div id="duorain-main-container" class="DLP_Main_Box">
-                    <div id="duorain-main-page" class="duorain-page">
-                        <div class="DLP_VStack_8">
-                           <div class="DLP_HStack_Auto_Top DLP_NoSelect">
-                                <div class="DLP_HStack_4">
-                                    <p class="DLP_Text_Style_2">Duo<span class="duorain-neon-blue">Rain</span></p>
-                                </div>
-                                <p class="DLP_Text_Style_1" style="margin-top: 2px; font-size: 14px; color: #FF9500;">BETA</p>
-                            </div>
-                            <div class="DLP_HStack_8" style="margin-bottom: 8px;">
-                               <div id="duorain-status-indicator" class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect idle">
-                                    <div id="duorain-rain-container"></div>
-                                    <p id="duorain-status-indicator-text" class="DLP_Text_Style_1">Status: Idle</p>
-                               </div>
-                               <div class="DLP_HStack_4" style="flex: none; gap: 8px;">
-                                   <div id="duorain-settings-button" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                     <svg viewBox="0 0 90 90" class="duorain-settings-svg"><path d="M 31.018 18.844 L 31.018 18.844 c -2.967 -1.229 -2.967 -5.431 0 -6.66 l 0 0 c 0.421 -0.174 0.621 -0.657 0.447 -1.078 L 29.91 7.352 c -0.174 -0.421 -0.657 -0.621 -1.078 -0.447 l 0 0 c -2.967 1.229 -5.938 -1.743 -4.709 -4.709 l 0 0 c 0.174 -0.421 -0.026 -0.904 -0.447 -1.078 l -3.754 -1.555 c -0.421 -0.174 -0.904 0.026 -1.078 0.447 c -1.229 2.967 -5.431 2.967 -6.66 0 c -0.174 -0.421 -0.657 -0.621 -1.078 -0.447 L 7.352 1.117 C 6.931 1.292 6.731 1.775 6.905 2.196 c 1.229 2.967 -1.743 5.938 -4.71 4.71 C 1.775 6.731 1.292 6.931 1.117 7.352 l -1.555 3.753 c -0.174 0.421 0.026 0.904 0.447 1.078 l 0 0 c 2.967 1.229 2.967 5.431 0 6.66 l 0 0 c -0.421 0.174 -0.621 0.657 -0.447 1.078 l 1.555 3.753 c 0.174 0.421 0.657 0.621 1.078 0.447 l 0 0 c 2.967 -1.229 5.938 1.743 4.709 4.71 l 0 0 C 6.73 29.253 6.93 29.736 7.351 29.91 l 3.753 1.555 c 0.421 0.174 0.904 -0.026 1.078 -0.447 l 0 0 c 1.229 -2.967 5.431 -2.967 6.66 0 l 0 0 c 0.174 0.421 0.657 0.621 1.078 0.447 l 3.753 -1.555 c 0.421 -0.174 0.621 -0.657 0.447 -1.078 l 0 0 c -1.229 -2.967 1.743 -5.938 4.71 -4.709 c 0.421 0.174 0.904 -0.026 1.078 -0.447 l 1.555 -3.753 C 31.639 19.501 31.439 19.018 31.018 18.844 z M 15.514 22.294 c -3.744 0 -6.78 -3.036 -6.78 -6.78 s 3.036 -6.78 6.78 -6.78 s 6.78 3.036 6.78 6.78 S 19.258 22.294 15.514 22.294 z" transform="matrix(2.81 0 0 2.81 1.4065934065934016 1.4065934016)"/></svg>
-                                   </div>
-                                    <div id="DLP_Main_Discord_Button_1_ID" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                        <svg width="22" height="16" viewBox="0 0 22 16" fill="#FFF" xmlns="http://www.w3.org/2000/svg"><path d="M18.289 1.34C16.9296 0.714 15.4761 0.259052 13.9565 0C13.7699 0.332095 13.5519 0.77877 13.4016 1.1341C11.7862 0.894993 10.1857 0.894993 8.60001 1.1341C8.44972 0.77877 8.22674 0.332095 8.03844 0C6.51721 0.259052 5.06204 0.715671 3.70267 1.34331C0.960812 5.42136 0.21754 9.39811 0.589177 13.3184C2.40772 14.655 4.17011 15.467 5.90275 15.9984C6.33055 15.4189 6.71209 14.8028 7.04078 14.1536C6.41478 13.9195 5.81521 13.6306 5.24869 13.2952C5.39898 13.1856 5.546 13.071 5.68803 12.9531C9.14342 14.5438 12.8978 14.5438 16.3119 12.9531C16.4556 13.071 16.6026 13.1856 16.7512 13.2952C16.183 13.6322 15.5818 13.9211 14.9558 14.1553C15.2845 14.8028 15.6644 15.4205 16.0939 16C17.8282 15.4687 19.5922 14.6567 21.4107 13.3184C21.8468 8.77378 20.6658 4.83355 18.289 1.34ZM7.51153 10.9075C6.47426 10.9075 5.62361 9.95435 5.62361 8.7937C5.62361 7.63305 6.45609 6.67831 7.51153 6.67831C8.56699 6.67831 9.41761 7.63138 9.39945 8.7937C9.40109 9.95435 8.56699 10.9075 7.51153 10.9075ZM14.4884 10.9075C13.4511 10.9075 12.6005 9.95435 12.6005 8.7937C12.6005 7.63305 13.4329 6.67831 14.4884 6.67831C15.5438 6.67831 16.3945 7.63138 16.3763 8.7937C16.3763 9.95435 15.5438 10.9075 14.4884 10.9075Z"></path></svg>
-                                   </div>
-                                   <div id="DLP_Main_GitHub_Button_1_ID" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                     <svg width="22" height="22" viewBox="0 0 22 22" fill="#FFF" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.0087 0.5C5.19766 0.5 0.5 5.3125 0.5 11.2662C0.5 16.0253 3.50995 20.0538 7.68555 21.4797C8.2076 21.5868 8.39883 21.248 8.39883 20.963C8.39883 20.7134 8.38162 19.8578 8.38162 18.9664C5.45836 19.6082 4.84962 17.683 4.84962 17.683C4.37983 16.4353 3.68375 16.1146 3.68375 16.1146C2.72697 15.4551 3.75345 15.4551 3.75345 15.4551C4.81477 15.5264 5.37167 16.5602 5.37167 16.5602C6.31103 18.1999 7.82472 17.7366 8.43368 17.4514C8.52058 16.7562 8.79914 16.2749 9.09491 16.0076C6.7634 15.758 4.31035 14.8312 4.31035 10.6957C4.31035 9.51928 4.72765 8.55678 5.38888 7.80822C5.28456 7.54091 4.9191 6.43556 5.49342 4.95616C5.49342 4.95616 6.38073 4.67091 8.38141 6.06128C9.23797 5.82561 10.1213 5.70573 11.0087 5.70472C11.896 5.70472 12.8005 5.82963 13.6358 6.06128C15.6367 4.67091 16.524 4.95616 16.524 4.95616C17.0983 6.43556 16.7326 7.54091 16.6283 7.80822C17.3069 8.55678 17.707 9.51928 17.707 10.6957C17.707 14.8312 15.254 15.7401 12.905 16.0076C13.2879 16.3463 13.6183 16.9878 13.6183 18.0039C13.6183 19.4477 13.6011 20.6064 13.6011 20.9627C13.6011 21.248 13.7926 21.5868 14.3144 21.4799C18.49 20.0536 21.5 16.0253 21.5 11.2662C21.5172 5.3125 16.8023 0.5 11.0087 0.5Z"/></svg>
-                                   </div>
-                               </div>
-                            </div>
-                            <div id="duorain-pinned-items-container" class="DLP_VStack_8">
-                            </div>
-                            <div id="duorain-see-more-button" class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect" style="justify-content: space-between; background: rgba(0, 122, 255, 0.1); outline: 2px solid rgba(0, 122, 255, 0.2); align-self: stretch;">
-                                <p class="DLP_Text_Style_1" style="color: #007AFF;">See More</p>
-                                <svg width="9" height="16" viewBox="0 0 9 16" fill="#007AFF" xmlns="http://www.w3.org/2000/svg"><path d="M8.57031 7.85938C8.57031 8.24219 8.4375 8.5625 8.10938 8.875L2.20312 14.6641C1.96875 14.8984 1.67969 15.0156 1.33594 15.0156C0.648438 15.0156 0.0859375 14.4609 0.0859375 13.7734C0.0859375 13.4219 0.226562 13.1094 0.484375 12.8516L5.63281 7.85156L0.484375 2.85938C0.226562 2.60938 0.0859375 2.28906 0.0859375 1.94531C0.0859375 1.26562 0.648438 0.703125 1.33594 0.703125C1.67969 0.703125 1.96875 0.820312 2.20312 1.05469L8.10938 6.84375C8.42969 7.14844 8.57031 7.46875 8.57031 7.85938Z"></path></svg>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="duorain-solver-page" class="duorain-page duorain-page-hidden">
-                        <div class="DLP_VStack_8">
-                           <div class="DLP_HStack_Auto_Top DLP_NoSelect">
-                               <div class="DLP_HStack_4">
-                                   <p class="DLP_Text_Style_2">Duo<span class="duorain-neon-blue">Rain</span></p>
-                               </div>
-                               <p class="DLP_Text_Style_1 duorain-autosolver-text" style="margin-top: 2px; font-size: 14px;">AUTO-SOLVER</p>
-                           </div>
-                            <div id="duorain-solver-controls" class="DLP_HStack_8" style="margin-top: 8px;">
-                                <div class="DLP_Button_Style_1 DLP_NoSelect" style="justify-content: space-between;">
-                                    <p class="DLP_Text_Style_1">Easy Solve</p>
-                                    <label class="duorain-switch-container">
-                                        <input type="checkbox" id="duorain-easy-solve-switch" class="duorain-switch">
-                                        <span class="duorain-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="DLP_HStack_4" style="flex: none; gap: 8px;">
-                                   <div id="duorain-settings-button-solver" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                     <svg viewBox="0 0 90 90" class="duorain-settings-svg"><path d="M 31.018 18.844 L 31.018 18.844 c -2.967 -1.229 -2.967 -5.431 0 -6.66 l 0 0 c 0.421 -0.174 0.621 -0.657 0.447 -1.078 L 29.91 7.352 c -0.174 -0.421 -0.657 -0.621 -1.078 -0.447 l 0 0 c -2.967 1.229 -5.938 -1.743 -4.709 -4.709 l 0 0 c 0.174 -0.421 -0.026 -0.904 -0.447 -1.078 l -3.754 -1.555 c -0.421 -0.174 -0.904 0.026 -1.078 0.447 c -1.229 2.967 -5.431 2.967 -6.66 0 c -0.174 -0.421 -0.657 -0.621 -1.078 -0.447 L 7.352 1.117 C 6.931 1.292 6.731 1.775 6.905 2.196 c 1.229 2.967 -1.743 5.938 -4.71 4.71 C 1.775 6.731 1.292 6.931 1.117 7.352 l -1.555 3.753 c -0.174 0.421 0.026 0.904 0.447 1.078 l 0 0 c 2.967 1.229 2.967 5.431 0 6.66 l 0 0 c -0.421 0.174 -0.621 0.657 -0.447 1.078 l 1.555 3.753 c 0.174 0.421 0.657 0.621 1.078 0.447 l 0 0 c 2.967 -1.229 5.938 1.743 4.709 4.71 l 0 0 C 6.73 29.253 6.93 29.736 7.351 29.91 l 3.753 1.555 c 0.421 0.174 0.904 -0.026 1.078 -0.447 l 0 0 c 1.229 -2.967 5.431 -2.967 6.66 0 l 0 0 c 0.174 0.421 0.657 0.621 1.078 0.447 l 3.753 -1.555 c 0.421 -0.174 0.621 -0.657 0.447 -1.078 l 0 0 c -1.229 -2.967 1.743 -5.938 4.71 -4.709 c 0.421 0.174 0.904 -0.026 1.078 -0.447 l 1.555 -3.753 C 31.639 19.501 31.439 19.018 31.018 18.844 z M 15.514 22.294 c -3.744 0 -6.78 -3.036 -6.78 -6.78 s 3.036 -6.78 6.78 -6.78 s 6.78 3.036 6.78 6.78 S 19.258 22.294 15.514 22.294 z" transform="matrix(2.81 0 0 2.81 1.4065934065934016 1.4065934016)"/></svg>
-                                   </div>
-                                    <div id="DLP_Main_Discord_Button_1_ID-solver" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                        <svg width="22" height="16" viewBox="0 0 22 16" fill="#FFF" xmlns="http://www.w3.org/2000/svg"><path d="M18.289 1.34C16.9296 0.714 15.4761 0.259052 13.9565 0C13.7699 0.332095 13.5519 0.77877 13.4016 1.1341C11.7862 0.894993 10.1857 0.894993 8.60001 1.1341C8.44972 0.77877 8.22674 0.332095 8.03844 0C6.51721 0.259052 5.06204 0.715671 3.70267 1.34331C0.960812 5.42136 0.21754 9.39811 0.589177 13.3184C2.40772 14.655 4.17011 15.467 5.90275 15.9984C6.33055 15.4189 6.71209 14.8028 7.04078 14.1536C6.41478 13.9195 5.81521 13.6306 5.24869 13.2952C5.39898 13.1856 5.546 13.071 5.68803 12.9531C9.14342 14.5438 12.8978 14.5438 16.3119 12.9531C16.4556 13.071 16.6026 13.1856 16.7512 13.2952C16.183 13.6322 15.5818 13.9211 14.9558 14.1553C15.2845 14.8028 15.6644 15.4205 16.0939 16C17.8282 15.4687 19.5922 14.6567 21.4107 13.3184C21.8468 8.77378 20.6658 4.83355 18.289 1.34ZM7.51153 10.9075C6.47426 10.9075 5.62361 9.95435 5.62361 8.7937C5.62361 7.63305 6.45609 6.67831 7.51153 6.67831C8.56699 6.67831 9.41761 7.63138 9.39945 8.7937C9.40109 9.95435 8.56699 10.9075 7.51153 10.9075ZM14.4884 10.9075C13.4511 10.9075 12.6005 9.95435 12.6005 8.7937C12.6005 7.63305 13.4329 6.67831 14.4884 6.67831C15.5438 6.67831 16.3945 7.63138 16.3763 8.7937C16.3763 9.95435 15.5438 10.9075 14.4884 10.9075Z"></path></svg>
-                                   </div>
-                                   <div id="DLP_Main_GitHub_Button_1_ID-solver" class="duorain-icon-button DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect">
-                                     <svg width="22" height="22" viewBox="0 0 22 22" fill="#FFF" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.0087 0.5C5.19766 0.5 0.5 5.3125 0.5 11.2662C0.5 16.0253 3.50995 20.0538 7.68555 21.4797C8.2076 21.5868 8.39883 21.248 8.39883 20.963C8.39883 20.7134 8.38162 19.8578 8.38162 18.9664C5.45836 19.6082 4.84962 17.683 4.84962 17.683C4.37983 16.4353 3.68375 16.1146 3.68375 16.1146C2.72697 15.4551 3.75345 15.4551 3.75345 15.4551C4.81477 15.5264 5.37167 16.5602 5.37167 16.5602C6.31103 18.1999 7.82472 17.7366 8.43368 17.4514C8.52058 16.7562 8.79914 16.2749 9.09491 16.0076C6.7634 15.758 4.31035 14.8312 4.31035 10.6957C4.31035 9.51928 4.72765 8.55678 5.38888 7.80822C5.28456 7.54091 4.9191 6.43556 5.49342 4.95616C5.49342 4.95616 6.38073 4.67091 8.38141 6.06128C9.23797 5.82561 10.1213 5.70573 11.0087 5.70472C11.896 5.70472 12.8005 5.82963 13.6358 6.06128C15.6367 4.67091 16.524 4.95616 16.524 4.95616C17.0983 6.43556 16.7326 7.54091 16.6283 7.80822C17.3069 8.55678 17.707 9.51928 17.707 10.6957C17.707 14.8312 15.254 15.7401 12.905 16.0076C13.2879 16.3463 13.6183 16.9878 13.6183 18.0039C13.6183 19.4477 13.6011 20.6064 13.6011 20.9627C13.6011 21.248 13.7926 21.5868 14.3144 21.4799C18.49 20.0536 21.5 16.0253 21.5 11.2662C21.5172 5.3125 16.8023 0.5 11.0087 0.5Z"/></svg>
-                                   </div>
-                               </div>
-                            </div>
-                            <div id="duorain-solver-pinned-items-container" class="DLP_VStack_8"></div>
-                             <div id="duorain-solver-see-more-button" class="DLP_Button_Style_1 DLP_Magnetic_Hover_1 DLP_NoSelect" style="justify-content: space-between; background: rgba(0, 122, 255, 0.1); outline: 2px solid rgba(0, 122, 255, 0.2); align-self: stretch;">
-                                <p class="DLP_Text_Style_1" style="color: #007AFF;">See More</p>
-                                <svg width="9" height="16" viewBox="0 0 9 16" fill="#007AFF" xmlns="http://www.w3.org/2000/svg"><path d="M8.57031 7.85938C8.57031 8.24219 8.4375 8.5625 8.10938 8.875L2.20312 14.6641C1.96875 14.8984 1.67969 15.0156 1.33594 15.0156C0.648438 15.0156 0.0859375 14.4609 0.0859375 13.7734C0.0859375 13.4219 0.226562 13.1094 0.484375 12.8516L5.63281 7.85156L0.484375 2.85938C0.226562 2.60938 0.0859375 2.28906 0.0859375 1.94531C0.0859375 1.26562 0.648438 0.703125 1.33594 0.703125C1.67969 0.703125 1.96875 0.820312 2.20312 1.05469L8.10938 6.84375C8.42969 7.14844 8.57031 7.46875 8.57031 7.85938Z"></path></svg>
-                            </div>
-                       </div>
-                    </div>
-                    <div id="duorain-tasks-page" class="duorain-page duorain-page-hidden">
-                        <div class="DLP_VStack_8"><div class="DLP_HStack_Auto_Top DLP_NoSelect"><p class="DLP_Text_Style_2">Running Tasks</p><div class="duorain-back-button DLP_Magnetic_Hover_1" style="cursor: pointer; padding: 4px;" data-target="main"><p class="DLP_Text_Style_1" style="font-size: 14px; opacity: 0.8;">BACK</p></div></div><div id="duorain-running-tasks-list-content" class="DLP_VStack_8" style="margin-top: 8px;"></div></div>
-                    </div>
-                   <div id="duorain-settings-page" class="duorain-page duorain-page-hidden">
-                        <div class="DLP_VStack_8">
-                            <div class="DLP_HStack_Auto_Top DLP_NoSelect"><p class="DLP_Text_Style_2">Settings</p><div class="duorain-back-button DLP_Magnetic_Hover_1" style="cursor: pointer; padding: 4px;" data-target="main"><p class="DLP_Text_Style_1" style="font-size: 14px; opacity: 0.8;">BACK</p></div></div>
-                            <div id="duorain-settings-content" class="DLP_VStack_8" style="margin-top: 8px;">
-                                <div class="duorain-setting-row DLP_HStack_8">
-                                    <p class="DLP_Text_Style_1">Loop Delay (ms)</p>
-                                    <div class="DLP_HStack_8">
-                                        <div class="DLP_Input_Style_1_Active duorain-input-with-spinner">
-                                            <input type="number" min="0" id="duorain-loop-delay-input" class="DLP_Input_Input_Style_1">
-                                            <div class="duorain-spinner-controls">
-                                                <div id="duorain-delay-increment" class="duorain-spinner-button">
-                                                    <svg width="16" height="16" viewBox="-3.12 -3.12 30.24 30.24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                        <defs><filter id="DuoRain-UP-Filter-Spinner" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur in="SourceAlpha" stdDeviation=".5" result="blur1"/><feFlood flood-color="#2196F3" result="color1"/><feComposite in="color1" in2="blur1" operator="in" result="glow1"/><feGaussianBlur in="SourceAlpha" stdDeviation=".2" result="blur2"/><feFlood flood-color="#03A9F4" result="color2"/><feComposite in="color2" in2="blur2" operator="in" result="glow2"/><feMerge><feMergeNode in="glow1"/><feMergeNode in="glow2"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-                                                        <path d="m5 15 5-5.15a2.74 2.74 0 0 1 4 0L19 15" stroke="#03A9F4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#DuoRain-UP-Filter-Spinner)"/>
-                                                    </svg>
-                                                </div>
-                                                <div id="duorain-delay-decrement" class="duorain-spinner-button">
-                                                    <svg class="duorain-spinner-down-svg" width="16" height="16" viewBox="-3.12 -3.12 30.24 30.24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                        <defs><filter id="DuoRain-DOWN-Filter-Spinner" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur in="SourceAlpha" stdDeviation=".5" result="blur1"/><feFlood flood-color="#2196F3" result="color1"/><feComposite in="color1" in2="blur1" operator="in" result="glow1"/><feGaussianBlur in="SourceAlpha" stdDeviation=".2" result="blur2"/><feFlood flood-color="#03A9F4" result="color2"/><feComposite in="color2" in2="blur2" operator="in" result="glow2"/><feMerge><feMergeNode in="glow1"/><feMergeNode in="glow2"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-                                                        <path d="m5 15 5-5.15a2.74 2.74 0 0 1 4 0L19 15" stroke="#03A9F4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#DuoRain-DOWN-Filter-Spinner)"/>
-                                                    </svg>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="duorain-info-icon" data-tooltip="The delay in milliseconds between each farm loop. Default: 200 ms.">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0"/></svg>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="duorain-see-more-page" class="duorain-page duorain-page-hidden">
-                         <div class="DLP_VStack_8">
-                            <div class="DLP_HStack_Auto_Top DLP_NoSelect">
-                                <p class="DLP_Text_Style_2">More Features</p>
-                                <div class="duorain-back-button DLP_Magnetic_Hover_1" style="cursor: pointer; padding: 4px;" data-target="main">
-                                    <p class="DLP_Text_Style_1" style="font-size: 14px; opacity: 0.8;">BACK</p>
-                                </div>
-                            </div>
-                            <div id="duorain-see-more-content" class="duorain-feature-grid">
-                            </div>
-                        </div>
-                    </div>
-                    <div id="duorain-solver-more-page" class="duorain-page duorain-page-hidden">
-                         <div class="DLP_VStack_8">
-                            <div class="DLP_HStack_Auto_Top DLP_NoSelect">
-                                <p class="DLP_Text_Style_2">Solver Features</p>
-                                <div class="duorain-back-button DLP_Magnetic_Hover_1" style="cursor: pointer; padding: 4px;" data-target="solver">
-                                    <p class="DLP_Text_Style_1" style="font-size: 14px; opacity: 0.8;">BACK</p>
-                                </div>
-                            </div>
-                            <div id="duorain-solver-see-more-content" class="duorain-feature-grid">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div id="duorain-feature-templates" style="display: none;">
-                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="xp">
-                    <div class="DLP_HStack_8 duorain-feature-header">
-                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">How many XP loops would you like to run?</p>
-                        <div class="duorain-pin-icon">
-                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                     <div class="DLP_HStack_8">
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                                             <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                                        </div>
-                                        <div class="DLP_Input_Style_1_Active"><input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="xp"></div>
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-xp-farm"><p class="DLP_Text_Style_1" style="color: #FFF;">RUN</p></div>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="gem">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">How many Gem loops would you like to run?</p>
-                                        <div class="duorain-pin-icon">
-                                             <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="DLP_HStack_8">
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                                             <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                                        </div>
-                                        <div class="DLP_Input_Style_1_Active"><input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="gem"></div>
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-gem-farm"><p class="DLP_Text_Style_1" style="color: #FFF;">RUN</p></div>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="streak">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">How many days of Streak to repair?</p>
-                                        <div class="duorain-pin-icon">
-                                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="DLP_HStack_8">
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                                            <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                                        </div>
-                                        <div class="DLP_Input_Style_1_Active"><input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="streak"></div>
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-streak-farm"><p class="DLP_Text_Style_1" style="color: #FFF;">GET</p></div>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="fullquests">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">Complete all quests & unlock all badges?</p>
-                                        <div class="duorain-pin-icon">
-                                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="duorain-super-button DLP_Magnetic_Hover_1 DLP_NoSelect" data-action="run-fullquests">
-                                        <p>COMPLETE</p>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="streak-freeze">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">How many Streak Freezes would you like to redeem?</p>
-                                        <div class="duorain-pin-icon">
-                                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="DLP_HStack_8">
-                                        <div class="DLP_Input_Style_1_Active duorain-input-with-spinner" style="padding:0; height: 48px;">
-                                            <span id="duorain-freeze-value" class="DLP_Input_Input_Style_1" style="display:flex; align-items:center; justify-content:center; padding-right: 24px;">0</span>
-                                            <div class="duorain-spinner-controls">
-                                                <div id="duorain-freeze-increment" class="duorain-spinner-button">
-                                                    <svg width="16" height="16" viewBox="-3.12 -3.12 30.24 30.24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="m5 15 5-5.15a2.74 2.74 0 0 1 4 0L19 15" stroke="#03A9F4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#DuoRain-UP-Filter-Spinner)"/></svg>
-                                                </div>
-                                                <div id="duorain-freeze-decrement" class="duorain-spinner-button">
-                                                    <svg class="duorain-spinner-down-svg" width="16" height="16" viewBox="-3.12 -3.12 30.24 30.24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="m5 15 5-5.15a2.74 2.74 0 0 1 4 0L19 15" stroke="#03A9F4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#DuoRain-DOWN-Filter-Spinner)"/></svg>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="grant-streak-freeze"><p class="DLP_Text_Style_1" style="color: #FFF;">GET</p></div>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="hearts">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">Would you like to refill your Hearts to full?</p>
-                                        <div class="duorain-pin-icon">
-                                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="duorain-super-button duorain-gradient-button DLP_Magnetic_Hover_1 DLP_NoSelect" data-action="grant-hearts">
-                                        <p>REFILL</p>
-                                    </div>
-                                </div>
-                                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="xp-boost">
-                                    <div class="DLP_HStack_8 duorain-feature-header">
-                                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch;">Would you like to redeem an XP Boost?</p>
-                                        <div class="duorain-pin-icon">
-                                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                                        </div>
-                                    </div>
-                                    <div class="duorain-super-button duorain-gradient-button DLP_Magnetic_Hover_1 DLP_NoSelect" data-action="grant-xp-boost">
-                                        <p>REDEEM</p>
-                                    </div>
-                                </div>
-                            </div>
-             <div id="duorain-solver-feature-templates" style="display: none;">
-                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="path-solve">
-                    <div class="DLP_HStack_8 duorain-feature-header">
-                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch; opacity: 0.8;">How many lessons would you like to solve on the path?</p>
-                        <div class="duorain-pin-icon">
-                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                        </div>
-                    </div>
-                    <div class="DLP_HStack_8">
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                            <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                        </div>
-                        <div class="DLP_Input_Style_1_Active">
-                            <input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="path-solve">
-                        </div>
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-path-solve"><p class="DLP_Text_Style_1" style="color: #FFF;">START</p></div>
-                    </div>
-                </div>
-                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="practice-solve">
-                    <div class="DLP_HStack_8 duorain-feature-header">
-                         <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch; opacity: 0.8;">How many practices would you like to solve?</p>
-                         <div class="duorain-pin-icon">
-                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                        </div>
-                    </div>
-                     <div class="DLP_HStack_8">
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                            <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                        </div>
-                        <div class="DLP_Input_Style_1_Active">
-                            <input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="practice-solve">
-                        </div>
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-practice-solve"><p class="DLP_Text_Style_1" style="color: #FFF;">START</p></div>
-                    </div>
-                </div>
-                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="listen-solve">
-                    <div class="DLP_HStack_8 duorain-feature-header">
-                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch; opacity: 0.8;">How many listening practices would you like to solve?</p>
-                        <div class="duorain-pin-icon">
-                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                        </div>
-                    </div>
-                     <div class="DLP_HStack_8">
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                             <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                        </div>
-                        <div class="DLP_Input_Style_1_Active">
-                            <input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="listen-solve">
-                        </div>
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-listen-solve"><p class="DLP_Text_Style_1" style="color: #FFF;">START</p></div>
-                    </div>
-                </div>
-                <div class="DLP_VStack_8 duorain-feature-item" data-farm-id="lesson-solve">
-                     <div class="DLP_HStack_8 duorain-feature-header">
-                        <p class="DLP_Text_Style_1 DLP_NoSelect" style="align-self: stretch; opacity: 0.8;">Which and how many lessons would you like to repeat?</p>
-                        <div class="duorain-pin-icon">
-                            <svg class="pin-active" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M0.140625 12.25C0.140625 10.5156 1.50781 8.80469 3.73438 7.96875L3.98438 4.25781C2.77344 3.57812 1.875 2.85156 1.47656 2.35156C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.35156C11.1094 2.85156 10.2109 3.57031 9 4.25781L9.25781 7.96875C11.4766 8.80469 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438C0.679688 13.5547 0.140625 13.0312 0.140625 12.25Z"></path></svg>
-                            <svg class="pin-inactive" width="13" height="20" viewBox="0 0 13 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path opacity="0.5" d="M1.48438 13.5547C0.679688 13.5547 0.140625 13.0312 0.140625 12.25C0.140625 10.5156 1.50781 8.85156 3.55469 8.01562L3.80469 4.25781C2.77344 3.57031 1.86719 2.85156 1.47656 2.34375C1.24219 2.05469 1.13281 1.74219 1.13281 1.46094C1.13281 0.875 1.57812 0.453125 2.22656 0.453125H10.7578C11.4062 0.453125 11.8516 0.875 11.8516 1.46094C11.8516 1.74219 11.7422 2.05469 11.5078 2.34375C11.1172 2.85156 10.2188 3.57031 9.17969 4.25781L9.42969 8.01562C11.4766 8.85156 12.8438 10.5156 12.8438 12.25C12.8438 13.0312 12.3047 13.5547 11.5 13.5547H7.40625V17.3203C7.40625 18.2578 6.74219 19.5703 6.49219 19.5703C6.24219 19.5703 5.57812 18.2578 5.57812 17.3203V13.5547H1.48438ZM6.49219 7.44531C6.92969 7.44531 7.35156 7.47656 7.75781 7.54688L7.53125 3.55469C7.52344 3.38281 7.5625 3.29688 7.69531 3.21875C8.5625 2.76562 9.23438 2.28125 9.46094 2.07812C9.53125 2.00781 9.49219 1.92969 9.41406 1.92969H3.57812C3.5 1.92969 3.45312 2.00781 3.52344 2.07812C3.75 2.28125 4.42188 2.76562 5.28906 3.21875C5.42188 3.29688 5.46094 3.38281 5.45312 3.55469L5.22656 7.54688C5.63281 7.47656 6.05469 7.44531 6.49219 7.44531ZM1.92188 11.9844H11.0625C11.1797 11.9844 11.2344 11.9141 11.2109 11.7734C10.9922 10.3906 9.08594 8.96875 6.49219 8.96875C3.89844 8.96875 1.99219 10.3906 1.77344 11.7734C1.75 11.9141 1.80469 11.9844 1.92188 11.9844Z"></path></svg>
-                        </div>
-                    </div>
-                     <div class="DLP_HStack_8">
-                            <div class="DLP_Input_Style_1_Active">
-                                <div style="display: flex; align-items: center; gap: 8px; width: 100%; justify-content: flex-end;">
-                                    <p class="DLP_Text_Style_1 DLP_NoSelect" style="color: #007AFF; opacity: 0.5;">Unit:</p>
-                                    <input type="text" value="1" placeholder="1" class="DLP_Input_Input_Style_1" data-input-for="lesson-unit" style="width: 30px;">
-                                    <p class="DLP_Text_Style_1 DLP_NoSelect" style="color: #007AFF; opacity: 0.5;">Lesson:</p>
-                                    <input type="text" value="1" placeholder="1" class="DLP_Input_Input_Style_1" data-input-for="lesson-level" style="width: 30px;">
-                                </div>
-                            </div>
-                        </div>
-                    <div class="DLP_HStack_8">
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-infinity-button" style="width: 48px; padding: 0;">
-                             <p class="DLP_Text_Style_1" style="color: #007AFF; font-size: 24px; line-height: 1;">#</p>
-                        </div>
-                        <div class="DLP_Input_Style_1_Active">
-                            <input type="text" placeholder="0" class="DLP_Input_Input_Style_1 duorain-value-input" data-input-for="lesson-solve">
-                        </div>
-                        <div class="DLP_Input_Button_Style_1_Active DLP_Magnetic_Hover_1 DLP_NoSelect duorain-gradient-button" data-action="start-lesson-solve"><p class="DLP_Text_Style_1" style="color: #FFF;">START</p></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-        const uiStyle = `
-        @font-face {
-            font-family: 'DuoRain';
-            src: url(https://raw.githubusercontent.com/SlimyThor/DuoRain.Site/main/DuoRain.woff2) format('woff2');
-            font-weight: 600;
-        }
- 
-        :root {
-            --duorain-bg-color: rgb(var(--color-snow), 0.65);
-            --duorain-text-color: rgb(var(--color-black-text));
-            --duorain-border-color: rgb(var(--color-eel), 0.10);
-            --duorain-icon-btn-outline: rgba(0,0,0,0.08);
-            --duorain-input-bg: rgba(0, 122, 255, 0.10);
-            --duorain-input-outline: rgba(0, 122, 255, 0.20);
-            --duorain-input-text: #007AFF;
-            --duorain-input-placeholder: rgba(0, 122, 255, 0.5);
-            --duorain-status-box-bg: rgba(0, 0, 0, 0.05);
-            --duorain-idle-bg: rgb(var(--color-eel), 0.10);
-            --duorain-idle-text: rgb(var(--color-eel));
-            --duorain-running-bg: rgba(255, 149, 0, 0.2);
-            --duorain-running-text: #f57c00;
-            --duorain-tooltip-bg: #333;
-            --duorain-tooltip-text: #fff;
-        }
-        html._2L9MF {
-            --duorain-bg-color: rgb(var(--color-gray-9), 0.7);
-            --duorain-text-color: rgb(var(--color-snow));
-            --duorain-border-color: rgb(var(--color-gray-2), 0.10);
-            --duorain-icon-btn-outline: rgba(255,255,255,0.2);
-            --duorain-input-bg: rgba(0, 0, 0, 0.2);
-            --duorain-input-outline: rgba(0, 122, 255, 0.20);
-            --duorain-input-text: #89CFF0;
-            --duorain-input-placeholder: rgba(137, 207, 240, 0.5);
-            --duorain-status-box-bg: rgba(0,0,0,0.2);
-            --duorain-idle-bg: rgba(120, 120, 128, 0.2);
-            --duorain-idle-text: rgba(255,255,255,0.6);
-            --duorain-running-bg: rgba(255, 149, 0, 0.3);
-            --duorain-running-text: #FFD580;
-            --duorain-tooltip-bg: #F2F2F2;
-            --duorain-tooltip-text: #333;
-        }
-        #duorain-solver-button {
-            background: rgba(0, 122, 255, 0.1);
-            outline: 2px solid rgba(0, 200, 255, 0.2);
-            backdrop-filter: blur(16px);
-        }
-        .duorain-neon-glow {
-             color: hsl(210, 100%, 50%);
-             text-shadow: 0 0 5px hsl(210, 100%, 50%),
-                          0 0 10px hsl(210, 100%, 50%),
-                          0 0 20px hsl(210, 100%, 50%),
-                          0 0 40px hsl(210, 100%, 50%);
-        }
- 
-        .duorain-autosolver-text {
-             color: #FF9500 !important;
-             text-shadow: none;
-        }
- 
-       #duorain-solver-button .open-svg {
-            stroke: hsl(210, 100%, 50%);
-             filter: drop-shadow(0 0 2px hsl(210, 100%, 50%)) drop-shadow(0 0 5px hsl(210, 100%, 50%));
-        }
-        #duorain-solver-button:hover {
-            filter: brightness(1.2);
-        }
-        @keyframes fall {
-            to { transform: translateY(60px) rotate(10deg); }
-        }
-        .DLP_NoSelect { -webkit-user-select: none; -ms-user-select: none; user-select: none; }
-        .DLP_Text_Style_1 { font-family: "DuoRain", sans-serif; font-size: 16px; font-weight: 500; margin: 0; transition: color 0.4s ease, opacity 0.4s, filter 0.4s; }
-        .DLP_Text_Style_2 { font-family: "DuoRain", sans-serif; font-size: 24px; font-weight: 500; margin: 0; transition: color 0.4s ease; }
-        .duorain-neon-blue { color: #03A9F4; text-shadow: 0 0 2px #03A9F4, 0 0 6px #2196F3; }
-        .DLP_Magnetic_Hover_1 { transition: filter 0.4s cubic-bezier(0.16, 1, 0.32, 1), transform 0.4s cubic-bezier(0.16, 1, 0.32, 1); cursor: pointer; }
-        .DLP_Magnetic_Hover_1:hover { filter: brightness(0.9); transform: scale(1.05); }
-        .DLP_Magnetic_Hover_1:active { filter: brightness(0.9); transform: scale(0.9); }
-        .DLP_Main { display: inline-flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; gap: 8px; position: fixed; right: 16px; bottom: 16px; z-index: 9999; transition: bottom 0.8s cubic-bezier(0.16, 1, 0.32, 1); }
-        .duorain-page { display: flex; flex-direction: column; width: 100%; transition: opacity 0.2s ease-out, filter .4s ease-out; }
-        .duorain-page-hidden { display: none !important; }
-        .DLP_Main_Box { display: flex; width: 340px; padding: 24px 20px; box-sizing: border-box; flex-direction: column; gap: 8px; border-radius: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); transition: background 0.4s ease, border-color 0.4s ease, backdrop-filter 0.4s ease, opacity 0.8s cubic-bezier(0.16, 1, 0.32, 1), filter 0.8s cubic-bezier(0.16, 1, 0.32, 1), width 0.4s cubic-bezier(0.16, 1, 0.32, 1), height 0.4s cubic-bezier(0.16, 1, 0.32, 1); background: var(--duorain-bg-color); backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); border: 1px solid var(--duorain-border-color); overflow: hidden; }
-        .DLP_Main_Box.duorain-wide-box { width: 420px; }
-        .DLP_HStack_Auto_Top, .DLP_HStack_4, .DLP_HStack_8 { display: flex; align-items: center; align-self: stretch; }
-        .DLP_HStack_Auto_Top { justify-content: space-between; align-items: flex-start; }
-        .DLP_HStack_4 { gap: 4px; }
-        .DLP_HStack_8 { gap: 8px; }
-        .DLP_VStack_8 { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; align-self: stretch; }
-        .DLP_Button_Style_1 { display: flex; height: 40px; padding: 10px 12px; box-sizing: border-box; align-items: center; gap: 6px; flex: 1 0 0; border-radius: 12px; transition: width 0.8s cubic-bezier(0.77,0,0.18,1), background 0.8s cubic-bezier(0.16, 1, 0.32, 1), outline 0.8s cubic-bezier(0.16, 1, 0.32, 1); }
-        .duorain-icon-button { justify-content: center; flex: none; width: 40px; padding: 10px; transition: background-color 0.4s, outline-color 0.4s; }
-        #DLP_Main_GitHub_Button_1_ID, #DLP_Main_GitHub_Button_1_ID-solver { background: #333333; }
-        #DLP_Main_Discord_Button_1_ID, #DLP_Main_Discord_Button_1_ID-solver { background: #5865F2; }
-        #duorain-settings-button, #duorain-settings-button-solver { background: linear-gradient(110deg,hsl(154deg 70% 50%) 0%,hsl(166deg 100% 42%) 6%,hsl(172deg 100% 42%) 13%,hsl(179deg 100% 41%) 19%,hsl(185deg 100% 43%) 25%,hsl(189deg 100% 46%) 31%,hsl(193deg 100% 48%) 37%,hsl(195deg 100% 48%) 44%,hsl(199deg 92% 54%) 50%,hsl(203deg 78% 52%) 56%,hsl(207deg 64% 50%) 63%,hsl(213deg 56% 48%) 69%,hsl(219deg 49% 44%) 75%,hsl(228deg 42% 40%) 81%,hsl(240deg 36% 36%) 87%,hsl(255deg 44% 28%) 94%,hsl(269deg 58% 20%) 100%); outline: none; }
-        .duorain-settings-svg { width: 22px; height: 22px; }
-        .duorain-settings-svg path { fill: #FFF; transition: fill 0.4s ease; }
-        .DLP_Input_Style_1_Active { display: flex; height: 48px; padding: 16px; box-sizing: border-box; align-items: center; flex: 1 0 0; gap: 6px; border-radius: 8px; transition: background 0.4s ease, outline 0.4s ease; background: var(--duorain-input-bg); outline: 2px solid var(--duorain-input-outline); }
-        .duorain-infinity-button { background: rgba(0, 122, 255, 0.10); outline: 2px solid rgba(0, 122, 255, 0.20); border-radius: 8px; }
-        .duorain-infinity-button p { color: #007AFF; font-size: 24px; line-height: 1; }
-        .duorain-gradient-button, .duorain-super-button { background: linear-gradient(110deg,hsl(154deg 70% 50%) 0%,hsl(166deg 100% 42%) 6%,hsl(172deg 100% 42%) 13%,hsl(179deg 100% 41%) 19%,hsl(185deg 100% 43%) 25%,hsl(189deg 100% 46%) 31%,hsl(193deg 100% 48%) 37%,hsl(195deg 100% 48%) 44%,hsl(199deg 92% 54%) 50%,hsl(203deg 78% 52%) 56%,hsl(207deg 64% 50%) 63%,hsl(213deg 56% 48%) 69%,hsl(219deg 49% 44%) 75%,hsl(228deg 42% 40%) 81%,hsl(240deg 36% 36%) 87%,hsl(255deg 44% 28%) 94%,hsl(269deg 58% 20%) 100%); box-shadow: 0 4px 15px rgba(28, 176, 246, 0.4); border: none; border-radius: 12px; }
-        #duorain-solver-page .duorain-gradient-button { border-radius: 8px; }
-        .DLP_Input_Button_Style_1_Active { display: flex; height: 48px; padding: 12px; box-sizing: border-box; justify-content: center; align-items: center; gap: 6px; }
-        .DLP_Input_Button_Style_1_Active p { font-weight: 700; text-transform: uppercase; }
-        .DLP_Input_Input_Style_1 { border: none; outline: none; background: none; text-align: right; font-family: "DuoRain", sans-serif; font-size: 16px; font-weight: 500; width: 100%; transition: color 0.4s ease; color: var(--duorain-input-text); }
-        .DLP_Input_Input_Style_1::placeholder { transition: color 0.4s ease; color: var(--duorain-input-placeholder); }
-        .DLP_Input_Input_Style_1:disabled { background-color: transparent; }
-        #duorain-status-indicator { position: relative; overflow: hidden; justify-content: center; transition: all 0.3s ease; gap: 8px; }
-        #duorain-rain-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        .raindrop { position: absolute; bottom: 100%; width: 1px; height: 15px; background: linear-gradient(to bottom, rgba(0, 122, 255, 0), rgba(0, 122, 255, 0.8)); animation: fall linear infinite; transform: rotate(10deg); }
-        #duorain-running-tasks-list-content, #duorain-settings-content { width: 100%; }
-        .duorain-farm-status-box { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 12px; transition: background-color 0.4s ease; background-color: var(--duorain-status-box-bg); width: 100%; box-sizing: border-box; }
-        .duorain-farm-status-box .status-text { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .duorain-farm-status-box .duorain-button-stop { padding: 4px 10px; border-radius: 8px; border: none; background-color: #FF3B30; color: white; font-size: 12px; font-weight: bold; cursor: pointer; transition: background-color 0.2s; }
-        .duorain-setting-row { justify-content: space-between; align-items: center; width: 100%; }
-        .duorain-small-input { height: 40px; width: 80px; padding: 12px; }
-        .duorain-small-input input { text-align: center !important; }
-        .duorain-info-icon { position: relative; cursor: help; display: flex; align-items: center; justify-content: center; }
-        .duorain-info-icon svg { width: 20px; height: 20px; fill: var(--duorain-text-color); opacity: 0.7; transition: opacity 0.3s ease; }
-        .duorain-info-icon:hover::after { content: attr(data-tooltip); position: absolute; top: 50%; right: 120%; transform: translateY(-50%); width: 240px; background-color: var(--duorain-tooltip-bg); color: var(--duorain-tooltip-text); padding: 8px 10px; border-radius: 6px; font-size: 14px; font-family: "DuoRain", sans-serif; font-weight: 500; z-index: 10001; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-        .duorain-info-icon:hover svg { opacity: 1; }
-        .duorain-super-button { display: flex; height: 48px; justify-content: center; align-items: center; align-self: stretch; box-sizing: border-box; }
-        .duorain-super-button p { font-family: "DuoRain", sans-serif; font-weight: 700; font-size: 16px; color: #FFF; text-shadow: 0 1px 2px rgba(0,0,0,0.25); margin: 0; text-transform: uppercase; }
-        .DLP_Text_Style_1, .DLP_Text_Style_2 { color: var(--duorain-text-color); }
-        .duorain-farm-status-box .status-text { color: var(--duorain-text-color); }
-        #duorain-status-indicator.idle { background-color: var(--duorain-idle-bg); }
-        #duorain-status-indicator.idle p { color: var(--duorain-idle-text); }
-        #duorain-status-indicator.running { background-color: var(--duorain-running-bg); }
-        #duorain-status-indicator.running p { color: var(--duorain-running-text); }
-        #duorain-hide-button svg { transition: 0.4s; }
-        .duorain-feature-grid { display: flex; flex-wrap: wrap; justify-content: space-between; align-content: flex-start; gap: 8px; width: 100%; }
-        .duorain-feature-item { flex-basis: calc(50% - 4px); justify-content: space-between; }
-        .duorain-feature-header { justify-content: space-between; align-items: center; width: 100%; }
-        #duorain-pinned-items-container .duorain-feature-item, #duorain-solver-pinned-items-container .duorain-feature-item { width: 100%; flex-basis: 100%; }
-        #duorain-pinned-items-container .duorain-pin-icon, #duorain-solver-pinned-items-container .duorain-pin-icon { display: none; }
-        .duorain-pin-icon { cursor: pointer; }
-        .duorain-pin-icon .pin-active { display: none; }
-        .duorain-pin-icon.pinned .pin-active { display: block; }
-        .duorain-pin-icon.pinned .pin-inactive { display: none; }
-        .duorain-pin-icon svg { fill: var(--duorain-text-color); opacity: 0.5; width: 20px; height: 20px; }
-        .duorain-notification { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background-color: var(--duorain-bg-color); color: var(--duorain-text-color); padding: 12px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; transition: bottom 0.5s cubic-bezier(0.16, 1, 0.32, 1); font-family: "DuoRain", sans-serif; font-size: 16px; font-weight: 500; border: 1px solid var(--duorain-border-color); backdrop-filter: blur(10px); }
-        .duorain-switch-container { position: relative; display: inline-block; width: 50px; height: 28px; }
-        .duorain-switch { opacity: 0; width: 0; height: 0; }
-        .duorain-switch-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--duorain-idle-bg); transition: .4s; border-radius: 28px; }
-        .duorain-switch-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-        .duorain-switch:checked + .duorain-switch-slider { background-color: #2196F3; }
-        .duorain-switch:checked + .duorain-switch-slider:before { transform: translateX(22px); }
-        #duorain-solver-button .duorain-button-state { display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity 0.3s, visibility 0.3s; }
-        #solver-state-4-0 svg { height: 18px; width: auto; }
-        #solver-state-4-0 p { font-size: 18px; line-height: 1; }
-        .duorain-infinity-button.infinity-active { box-shadow: 0 0 8px #007aff; }
-        .duorain-feature-item[data-mode="infinity"] .DLP_Input_Style_1_Active { pointer-events: none; opacity: 0.5; }
- 
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type=number] {
-            -moz-appearance: textfield;
-        }
-        .duorain-input-with-spinner {
-            position: relative;
-            padding: 0;
-            height: 40px;
-            width: 100px;
-            align-items: stretch;
-        }
-        .duorain-input-with-spinner .DLP_Input_Input_Style_1 {
-            text-align: center !important;
-            padding-right: 24px;
-            padding-left: 12px;
-            box-sizing: border-box;
-            width: 100%;
-        }
-        .duorain-spinner-controls {
-            position: absolute;
-            right: 5px;
-            top: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 2px;
-        }
-        .duorain-spinner-button {
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.1s ease, background-color 0.2s;
-            border-radius: 4px;
-            width: 18px;
-            height: 18px;
-        }
-        .duorain-spinner-button:hover {
-            background-color: rgba(0, 122, 255, 0.15);
-        }
-        .duorain-spinner-button:active {
-            transform: scale(0.9);
-        }
-        .duorain-spinner-button svg {
-            width: 100%;
-            height: 100%;
-        }
-        .duorain-spinner-down-svg {
-            transform: rotate(180deg);
-        }
-        `;
- 
-    document.body.insertAdjacentHTML('beforeend', uiHTML);
-    GM_addStyle(uiStyle);
-    GM_addStyle("#duorain-hide-button.duorain-show-mode{transform:translateY(-6px);transition:transform .28s cubic-bezier(.16,1,.32,1)}html:not(._2L9MF) #duorain-hide-button.duorain-show-mode{background:rgba(0,122,255,.08)!important;outline:2px solid rgba(0,122,255,.5)!important}html:not(._2L9MF) #duorain-hide-button.duorain-show-mode #hide-show-text{color:#007AFF!important;text-shadow:none}html:not(._2L9MF) #duorain-hide-button.duorain-show-mode #show-icon{fill:#007AFF!important;filter:none;transform:none}html._2L9MF #duorain-hide-button.duorain-show-mode{background:rgba(0,200,255,.08)!important;outline:2px solid rgba(0,200,255,.5)!important}html._2L9MF #duorain-hide-button.duorain-show-mode #hide-show-text{color:#00E5FF!important;text-shadow:0 0 8px rgba(0,229,255,.9),0 0 14px rgba(0,229,255,.6)}html._2L9MF #duorain-hide-button.duorain-show-mode #show-icon{fill:#00E5FF!important;filter:drop-shadow(0 0 6px rgba(0,229,255,.9)) drop-shadow(0 0 14px rgba(0,229,255,.5));transform:none}#duorain-hide-button.duorain-show-mode:hover{transform:translateY(-8px) scale(1.03)}");
- 
- 
-    const pages = {
-        main: document.getElementById('duorain-main-page'),
-        tasks: document.getElementById('duorain-tasks-page'),
-        settings: document.getElementById('duorain-settings-page'),
-        more: document.getElementById('duorain-see-more-page'),
-        solver: document.getElementById('duorain-solver-page'),
-        solverMore: document.getElementById('duorain-solver-more-page')
- 
-    };
-    let currentPage = pages.main;
-    const mainBox = document.querySelector('.DLP_Main_Box');
- 
-     function updateSolverButtonState(targetPage) {
-        const autoState = document.getElementById('solver-state-auto');
-        const s4State = document.getElementById('solver-state-4-0');
-        if (targetPage === pages.main || targetPage === pages.tasks || targetPage === pages.settings || targetPage === pages.more) {
-            autoState.style.display = 'flex';
-            s4State.style.display = 'none';
-        } else {
-            autoState.style.display = 'none';
-            s4State.style.display = 'flex';
-        }
-    }
- 
- 
-    function switchToPage(targetPage) {
-        if (isAnimating || currentPage === targetPage) return;
-         updateSolverButtonState(targetPage);
- 
-        isAnimating = true;
-        const oldHeight = mainBox.offsetHeight;
-        currentPage.style.opacity = '0';
-        currentPage.style.filter = 'blur(4px)';
-        setTimeout(() => {
-            currentPage.classList.add('duorain-page-hidden');
-            targetPage.classList.remove('duorain-page-hidden');
-            if (targetPage === pages.more || targetPage === pages.solverMore) {
-                mainBox.classList.add('duorain-wide-box');
-            } else {
-                mainBox.classList.remove('duorain-wide-box');
-            }
-            const newHeight = targetPage.offsetHeight;
-            mainBox.style.height = `${oldHeight}px`;
-            requestAnimationFrame(() => {
-                mainBox.style.height = `${newHeight}px`;
-                setTimeout(() => {
-                    targetPage.style.opacity = '1';
-                    targetPage.style.filter = 'blur(0px)';
-                    isAnimating = false;
-                    mainBox.style.height = 'auto';
-                }, 400);
-            });
-            currentPage = targetPage;
-        }, 200);
-    }
- 
-    document.getElementById('duorain-hide-button').addEventListener("click", () => {
-        if (isAnimating) return;
-        isUiHidden = !isUiHidden;
-        hide(isUiHidden);
-    });
- 
-    document.getElementById('duorain-solver-button').addEventListener('click', () => {
-         if (currentPage === pages.solver || currentPage === pages.solverMore) {
-            switchToPage(pages.main);
-        } else {
-            switchToPage(pages.solver);
-        }
-    });
- 
-    document.getElementById('duorain-solver-see-more-button').addEventListener('click', () => switchToPage(pages.solverMore));
- 
-    document.getElementById('duorain-status-indicator').addEventListener('click', () => {
-        if (activeFarms.size > 0) switchToPage(pages.tasks);
-    });
- 
-    document.getElementById('duorain-settings-button').addEventListener('click', () => switchToPage(pages.settings));
-    document.getElementById('duorain-settings-button-solver').addEventListener('click', () => switchToPage(pages.settings));
- 
- 
-    document.getElementById('duorain-see-more-button').addEventListener('click', () => switchToPage(pages.more));
-   document.querySelectorAll('.duorain-back-button').forEach(button => {
-        button.addEventListener('click', (e) => {
-            const targetPageName = e.currentTarget.dataset.target || 'main';
-            const targetPage = pages[targetPageName];
-            if(targetPage) {
-                switchToPage(targetPage);
-            }
-        });
-    });
- 
-    document.getElementById('DLP_Main_GitHub_Button_1_ID').addEventListener('click', () => { window.open('https://github.com/OracleMythix/DuoRain-BETA', '_blank'); });
-    document.getElementById('DLP_Main_GitHub_Button_1_ID-solver').addEventListener('click', () => { window.open('https://github.com/OracleMythix/DuoRain-BETA', '_blank'); });
-    document.getElementById('DLP_Main_Discord_Button_1_ID').addEventListener('click', () => { window.open('https://discord.com/invite/yawq7BxJPy', '_blank'); });
-    document.getElementById('DLP_Main_Discord_Button_1_ID-solver').addEventListener('click', () => { window.open('https://discord.com/invite/yawq7BxJPy', '_blank'); });
- 
-    document.getElementById('duorain-ui-wrapper').addEventListener('click', e => {
-        const infinityButton = e.target.closest('.duorain-infinity-button');
-        if (infinityButton) {
-            const featureItem = infinityButton.closest('.duorain-feature-item');
-            const input = featureItem.querySelector('.duorain-value-input');
-            const infinityP = infinityButton.querySelector('p');
- 
-            if (featureItem.dataset.mode === 'infinity') {
-                featureItem.removeAttribute('data-mode');
-                infinityButton.classList.remove('infinity-active');
-                if (infinityP) infinityP.innerHTML = '#';
-                if(input) {
-                    input.disabled = false;
-                    input.value = '';
+
+        function modifyJson(jsonText) {
+            try {
+                const data = JSON.parse(jsonText);
+                data.hasPlus = true;
+                if (!data.trackingProperties || typeof data.trackingProperties !== 'object') {
+                    data.trackingProperties = {};
                 }
-            } else {
-                featureItem.dataset.mode = 'infinity';
-                infinityButton.classList.add('infinity-active');
-                if (infinityP) infinityP.innerHTML = '∞';
-                if(input) {
-                    input.disabled = true;
-                    input.value = '';
-                }
+                data.trackingProperties.has_item_gold_subscription = true;
+                data.shopItems = {
+                    ...data.shopItems,
+                    ...CUSTOM_SHOP_ITEMS
+                };
+                return JSON.stringify(data);
+            } catch (e) {
+                return jsonText;
             }
         }
-    });
- 
- 
-    hide(false, true);
-}
- 
-function showDuoRainNotification(message) {
-    const existing = document.querySelector('.duorain-notification');
-    if (existing) existing.remove();
-    const notification = document.createElement('div');
-    notification.className = 'duorain-notification';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    requestAnimationFrame(() => { notification.style.bottom = '20px'; });
-    setTimeout(() => {
-        notification.style.bottom = '-100px';
-        setTimeout(() => notification.remove(), 500);
-    }, 3000);
-}
- 
-function setButtonState(button, text, iconToShow, iconToHide, bgColor, outlineColor, textColor, delay, callback) {
-    const textElement = button.querySelector('p');
-    if (!textElement) return;
-    button.style.background = bgColor ?? '';
-    button.style.outline = outlineColor ?? '';
-    textElement.style.color = textColor ?? '';
-    let previousText = textElement.textContent;
-    textElement.textContent = text;
-    if (iconToShow) iconToShow.style.display = 'block';
-    if (iconToHide) iconToHide.style.display = 'none';
-    let buttonNewWidth = button.offsetWidth;
-    textElement.textContent = previousText;
-    if (iconToShow) iconToShow.style.display = 'none';
-    if (iconToHide) iconToHide.style.display = 'block';
-    button.style.width = `${button.offsetWidth}px`;
-    requestAnimationFrame(() => {
-        textElement.style.filter = 'blur(4px)';
-        textElement.style.opacity = '0';
-        if (iconToHide) {
-            iconToHide.style.transition = '0.4s';
-            iconToHide.style.filter = 'blur(4px)';
-            iconToHide.style.opacity = '0';
-        }
-        button.style.width = `${buttonNewWidth}px`;
-    });
-    setTimeout(() => {
-        textElement.style.transition = '0s';
-        textElement.offsetHeight;
-        textElement.style.transition = '0.4s';
-        if (iconToShow) iconToShow.style.display = 'block';
-        if (iconToHide) iconToHide.style.display = 'none';
-        if (iconToShow) {
-            iconToShow.style.transition = '0.4s';
-            iconToShow.style.filter = 'blur(4px)';
-            iconToShow.style.opacity = '0';
-        }
-        textElement.textContent = text;
-        requestAnimationFrame(() => {
-            textElement.style.filter = '';
-            textElement.style.opacity = '';
-            if (iconToShow) {
-                iconToShow.style.filter = '';
-                iconToShow.style.opacity = '1';
-            }
-        });
-        setTimeout(() => {
-            button.style.width = '';
-            if(callback) callback();
-        }, 400);
-    }, delay);
-}
- 
-function hide(value, immediate = false) {
-    if (isAnimating && !immediate) return;
-    isAnimating = true;
-    let wrapper = document.getElementById('duorain-ui-wrapper');
-    let mainBox = wrapper.querySelector('.DLP_Main_Box');
-    let hideButton = document.getElementById('duorain-hide-button');
-    let solverButton = document.getElementById('duorain-solver-button');
- 
-    const transitionDuration = immediate ? '0s' : '0.8s cubic-bezier(0.16, 1, 0.32, 1)';
-    wrapper.style.transition = `bottom ${transitionDuration}`;
-    mainBox.style.transition = `opacity ${transitionDuration}, filter ${transitionDuration}`;
-    solverButton.style.transition = `opacity ${transitionDuration}, filter ${transitionDuration}`;
- 
-    let mainBoxHeight = mainBox.offsetHeight;
-    if (value) {
-        setButtonState(hideButton, "Show", hideButton.querySelector("#show-icon"), hideButton.querySelector("#hide-icon"), null, null, null, immediate ? 0 : 400, () => hideButton.classList.add("duorain-show-mode"));
-        wrapper.style.bottom = `-${mainBoxHeight + 8}px`;
-        mainBox.style.filter = "blur(8px)";
-        mainBox.style.opacity = "0";
-        solverButton.style.filter = "blur(8px)";
-        solverButton.style.opacity = "0";
-        solverButton.style.pointerEvents = "none";
-    } else {
-        setButtonState(hideButton, "Hide", hideButton.querySelector("#hide-icon"), hideButton.querySelector("#show-icon"), "#007AFF", "2px solid rgba(0, 0, 0, 0.20)", "#FFF", immediate ? 0 : 400, () => hideButton.classList.remove("duorain-show-mode"));
-        wrapper.style.bottom = "16px";
-        mainBox.style.filter = "";
-        mainBox.style.opacity = "";
-        solverButton.style.filter = "";
-        solverButton.style.opacity = "";
-        solverButton.style.pointerEvents = "auto";
-    }
-    setTimeout(() => { isAnimating = false }, immediate ? 0 : 800);
-}
- 
-function renderItems() {
-    const pinnedContainer = document.getElementById('duorain-pinned-items-container');
-    const seeMoreContainer = document.getElementById('duorain-see-more-content');
-    const templatesContainer = document.getElementById('duorain-feature-templates');
-    pinnedContainer.innerHTML = '';
-    seeMoreContainer.innerHTML = '';
-    Array.from(templatesContainer.children).forEach(template => {
-        const farmId = template.dataset.farmId;
-        const seeMoreClone = template.cloneNode(true);
-        seeMoreContainer.appendChild(seeMoreClone);
-        if (settings.pins.includes(farmId)) {
-            const pinnedClone = template.cloneNode(true);
-            pinnedContainer.appendChild(pinnedClone);
-        }
-    });
-    updatePinIcons();
-}
- function renderSolverItems() {
-    const pinnedContainer = document.getElementById('duorain-solver-pinned-items-container');
-    const seeMoreContainer = document.getElementById('duorain-solver-see-more-content');
-    const templatesContainer = document.getElementById('duorain-solver-feature-templates');
-    pinnedContainer.innerHTML = '';
-    seeMoreContainer.innerHTML = '';
-    Array.from(templatesContainer.children).forEach(template => {
-        const farmId = template.dataset.farmId;
-        const seeMoreClone = template.cloneNode(true);
-        seeMoreContainer.appendChild(seeMoreClone);
-        if (settings.solverPins.includes(farmId)) {
-            const pinnedClone = template.cloneNode(true);
-            pinnedContainer.appendChild(pinnedClone);
-        }
-    });
-    updateSolverPinIcons();
-}
- 
- 
-function updatePinIcons() {
-    document.querySelectorAll('#duorain-see-more-content .duorain-pin-icon').forEach(icon => {
-        const farmId = icon.closest('.duorain-feature-item').dataset.farmId;
-        if (settings.pins.includes(farmId)) {
-            icon.classList.add('pinned');
-        } else {
-            icon.classList.remove('pinned');
-        }
-    });
-}
- 
- function updateSolverPinIcons() {
-    document.querySelectorAll('#duorain-solver-see-more-content .duorain-pin-icon').forEach(icon => {
-        const farmId = icon.closest('.duorain-feature-item').dataset.farmId;
-        if (settings.solverPins.includes(farmId)) {
-            icon.classList.add('pinned');
-        } else {
-            icon.classList.remove('pinned');
-        }
-    });
-}
- 
-function setupPinEventListeners() {
-    document.getElementById('duorain-see-more-page').addEventListener('click', (e) => {
-        const pinIcon = e.target.closest('.duorain-pin-icon');
-        if (pinIcon) {
-            const farmId = pinIcon.closest('.duorain-feature-item').dataset.farmId;
-            const index = settings.pins.indexOf(farmId);
-            if (index > -1) {
-                settings.pins.splice(index, 1);
-            } else {
-                if (settings.pins.length >= 3) {
-                    showDuoRainNotification("You can only pin up to 3 features.");
-                    return;
-                }
-                settings.pins.push(farmId);
-            }
-            saveSettings();
-            renderItems();
-        }
-    });
-}
-function setupSolverPinEventListeners() {
-    document.getElementById('duorain-solver-more-page').addEventListener('click', (e) => {
-        const pinIcon = e.target.closest('.duorain-pin-icon');
-        if (pinIcon) {
-            const farmId = pinIcon.closest('.duorain-feature-item').dataset.farmId;
-            const index = settings.solverPins.indexOf(farmId);
-            if (index > -1) {
-                settings.solverPins.splice(index, 1);
-            } else {
-                if (settings.solverPins.length >= 3) {
-                    showDuoRainNotification("You can only pin up to 3 features.");
-                    return;
-                }
-                settings.solverPins.push(farmId);
-            }
-            saveSettings();
-            renderSolverItems();
-        }
-    });
-}
- 
- 
-const activeFarms = new Map();
- 
-function createRain() {
-    if (raindrops.length > 0) return;
-    const rainContainer = document.getElementById('duorain-rain-container');
-    for (let i = 0; i < 20; i++) {
-        const raindrop = document.createElement('div');
-        raindrop.className = 'raindrop';
-        raindrop.style.left = `${Math.random() * 100}%`;
-        raindrop.style.animationDuration = `${0.5 + Math.random() * 0.3}s`;
-        raindrop.style.animationDelay = `${Math.random() * 2}s`;
-        rainContainer.appendChild(raindrop);
-        raindrops.push(raindrop);
-    }
-}
- 
-function clearRain() {
-    raindrops.forEach(drop => drop.remove());
-    raindrops.length = 0;
-}
- 
-function updateMasterStatus() {
-    const indicator = document.getElementById('duorain-status-indicator');
-    const indicatorText = document.getElementById('duorain-status-indicator-text');
-    const farmCount = activeFarms.size;
-    if (farmCount > 0) {
-        indicator.classList.remove('idle');
-        indicator.classList.add('running');
-        indicatorText.textContent = `Running (${farmCount})`;
-        createRain();
-    } else {
-        indicator.classList.remove('running');
-        indicator.classList.add('idle');
-        indicatorText.textContent = 'Status: Idle';
-        clearRain();
-    }
-}
- 
-function addFarmUI(farmId, message) {
-    const container = document.getElementById('duorain-running-tasks-list-content');
-    if (!container) return;
-    const farmBox = document.createElement('div');
-    farmBox.id = `farm-status-${farmId}`;
-    farmBox.className = 'duorain-farm-status-box';
-    farmBox.innerHTML = `<p class="DLP_Text_Style_1 status-text">${message}</p><button class="duorain-button-stop">Stop</button>`;
-    farmBox.querySelector('.duorain-button-stop').addEventListener('click', () => stopFarm(farmId));
-    container.appendChild(farmBox);
-    updateMasterStatus();
-}
- 
-function updateFarmStatus(farmId, message) {
-    const farmBox = document.getElementById(`farm-status-${farmId}`);
-    if (farmBox) {
-        farmBox.querySelector('.status-text').textContent = message;
-    }
-}
- 
-function finalizeFarmUI(farmId, finalMessage) {
-    const farmBox = document.getElementById(`farm-status-${farmId}`);
-    if (farmBox) {
-        farmBox.querySelector('.status-text').textContent = finalMessage;
-        const stopButton = farmBox.querySelector('.duorain-button-stop');
-        if (stopButton) stopButton.remove();
-        setTimeout(() => {
-            if(farmBox) farmBox.remove();
-            updateMasterStatus();
-        }, 5000);
-    }
-}
- 
-function stopFarm(farmId, isManual = true) {
-    if (!activeFarms.has(farmId)) return;
-    activeFarms.set(farmId, false);
-    activeFarms.delete(farmId);
-    updateMasterStatus();
-    document.querySelectorAll(`[data-action="start-${farmId}-farm"], [data-action="run-fullquests"], [data-action="start-${farmId}"], [data-action^="grant-"]`).forEach(btn => {
-        btn.style.pointerEvents = 'auto';
-        btn.style.opacity = 1;
-    });
- 
-     if (farmId.includes('-solve')) {
-        sessionStorage.removeItem(AUTO_CLICK_KEY);
-        sessionStorage.removeItem(SOLVER_SESSION_KEY);
-        sessionStorage.removeItem(MODIFIER_KEY);
-        if (isManual) {
-             finalizeFarmUI(farmId, "Stopped. Returning home...");
-             setTimeout(() => {window.location.href = "https://duolingo.com/learn";},1000)
-        }
-    }
- 
-    if (isManual) {
-        finalizeFarmUI(farmId, "Stopped.");
-    }
-}
- 
-function getDuoHeaders(jwt) {
-    return {
-        'Accept': 'application/json, text/plain, */*',
-        'user-agent': navigator.userAgent,
-        'authorization': `Bearer ${jwt}`,
-        'content-type': 'application/json'
-    };
-}
- 
-function getUserData(jwt, sub) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: `https://www.duolingo.com/2017-06-30/users/${sub}?fields=learningLanguage,fromLanguage,streakData,timezone,tz`,
-            headers: { 'authorization': `Bearer ${jwt}` },
-            onload: (response) => {
-                if (response.status >= 200 && response.status < 300) {
-                    const data = JSON.parse(response.responseText);
-                    resolve({
-                        fromLanguage: data.fromLanguage || 'en',
-                        learningLanguage: data.learningLanguage || 'es',
-                        streakStartDate: data.streakData?.currentStreak?.startDate,
-                        timezone: data.timezone || data.tz || 'UTC'
+
+        const originalFetch = unsafeWindow.fetch;
+        unsafeWindow.fetch = function (resource, options) {
+            const url = resource instanceof Request ? resource.url : resource;
+            const method = (resource instanceof Request) ? resource.method : (options?.method || 'GET');
+
+            if (shouldIntercept(url, method)) {
+                return originalFetch.apply(this, arguments).then(async (response) => {
+                    const cloned = response.clone();
+                    const jsonText = await cloned.text();
+                    const modified = modifyJson(jsonText);
+                    const newHeaders = new Headers(response.headers);
+
+                    return new Response(modified, {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: newHeaders
                     });
-                } else { reject(new Error(`HTTP error! status: ${response.status}`)); }
-            },
-            onerror: (error) => reject(error)
-        });
-    });
-}
-async function grantShopItem(jwt, uid, fromLang, toLang, itemName, friendlyName, quantity = 1) {
-    showDuoRainNotification(`Granting ${friendlyName}...`);
-    let successCount = 0;
-    for (let i = 0; i < quantity; i++) {
-        const success = await new Promise(resolve => {
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: `https://www.duolingo.com/2017-06-30/users/${uid}/shop-items`,
-                headers: {
-                    'accept': 'application/json',
-                    'authorization': `Bearer ${jwt}`,
-                    'content-type': 'application/json',
-                    'user-agent': 'Duodroid/6.26.2 Dalvik/2.1.0 (Linux; U; Android 13; Pixel 7 Build/TQ3A.230805.001)',
-                    'x-amzn-trace-id': `User=${uid}`
-                },
-                data: JSON.stringify({
-                    itemName: itemName,
-                    isFree: true,
-                    consumed: true,
-                    fromLanguage: fromLang,
-                    learningLanguage: toLang
-                }),
-                onload: (res) => {
-                    if (res.status >= 200 && res.status < 300) {
+                });
+            }
+            return originalFetch.apply(this, arguments);
+        };
+
+        const originalXhrOpen = unsafeWindow.XMLHttpRequest.prototype.open;
+        const originalXhrSend = unsafeWindow.XMLHttpRequest.prototype.send;
+
+        unsafeWindow.XMLHttpRequest.prototype.open = function (method, url, ...args) {
+            this._intercept = shouldIntercept(url, method);
+            originalXhrOpen.call(this, method, url, ...args);
+        };
+
+        unsafeWindow.XMLHttpRequest.prototype.send = function () {
+            if (this._intercept) {
+                const originalOnReadyStateChange = this.onreadystatechange;
+                const xhr = this;
+                this.onreadystatechange = function () {
+                    if (xhr.readyState === 4 && xhr.status >= 200 && xhr.status < 300) {
                         try {
-                            const data = JSON.parse(res.responseText);
-                            resolve(!!data.purchaseId);
-                        } catch (e) {
-                            resolve(false);
-                        }
-                    } else {
-                        resolve(false);
+                            const modifiedText = modifyJson(xhr.responseText);
+                            Object.defineProperty(xhr, 'responseText', {
+                                writable: true,
+                                value: modifiedText
+                            });
+                            Object.defineProperty(xhr, 'response', {
+                                writable: true,
+                                value: modifiedText
+                            });
+                        } catch (e) {}
                     }
+                    if (originalOnReadyStateChange) originalOnReadyStateChange.apply(this, arguments);
+                };
+            }
+            originalXhrSend.apply(this, arguments);
+        };
+
+        function removeManageSubscriptionSection() {
+            const sections = document.querySelectorAll('section._3f-te');
+            for (const section of sections) {
+                const h2 = section.querySelector('h2._203-l');
+                if (h2 && h2.textContent.trim() === 'Manage subscription') {
+                    section.remove();
+                    break;
+                }
+            }
+        }
+
+        const manageSubObserver = new MutationObserver(() => {
+            removeManageSubscriptionSection();
+        });
+
+        manageSubObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    getJWT() {
+        let match = document.cookie.match(new RegExp('(^| )jwt_token=([^;]+)'));
+        return match ? match[2] : null;
+    }
+
+    decJWT(token) {
+        try {
+            const base64Url = token.split(".")[1];
+            const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+            const jsonPayload = decodeURIComponent(atob(base64).split("").map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join(""));
+            return JSON.parse(jsonPayload);
+        } catch(e) { return null; }
+    }
+
+    formatHeads(jwt) {
+        return {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + jwt,
+            "User-Agent": navigator.userAgent
+        };
+    }
+
+    async getUser(sub, headers) {
+        const res = await fetch(`https://www.duolingo.com/2023-05-23/users/${sub}?fields=id,username,fromLanguage,learningLanguage,streak,totalXp,level,numFollowers,numFollowing,gems,creationDate,streakData,picture,trackingProperties`, { method: "GET", headers });
+        if (res.ok) return await res.json();
+        return null;
+    }
+
+    getQuestTimestamp(goalId) {
+        const regex = /^(\d{4})_(\d{2})_monthly/;
+        const match = goalId.match(regex);
+        if (match) {
+            const year = parseInt(match[1]);
+            const month = parseInt(match[2]) - 1;
+            const date = new Date(Date.UTC(year, month, 15, 12, 0, 0));
+            return date.toISOString();
+        }
+        return new Date().toISOString();
+    }
+
+    getGoalHeaders(token) {
+        return {
+            "Content-Type": "application/json",
+            "x-requested-with": "XMLHttpRequest",
+            "accept": "application/json; charset=UTF-8",
+            "Authorization": `Bearer ${token}`
+        };
+    }
+
+    async getPstatus(sub, headers) {
+        try {
+            const res = await fetch(`https://www.duolingo.com/2023-05-23/users/${sub}/privacy-settings?fields=privacySettings`, { method: "GET", headers });
+            const data = await res.json();
+            const social = data.privacySettings.find(s => s.id === "disable_social");
+            return social ? social.enabled : false;
+        } catch (e) { return false; }
+    }
+
+    async setPstatus(sub, headers, isPrivate) {
+        try {
+            await fetch(`https://www.duolingo.com/2023-05-23/users/${sub}/privacy-settings?fields=privacySettings`, {
+                method: "PATCH", headers, body: JSON.stringify({ "DISABLE_SOCIAL": isPrivate })
+            });
+        } catch (e) {}
+    }
+
+    async getLdata(userId, headers) {
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: "GET", url: `${config.api.leaderboards}/users/${userId}?client_unlocked=true&get_reactions=true&_=${Date.now()}`, headers,
+                onload: (res) => resolve(res.status === 200 ? JSON.parse(res.responseText) : null),
+                onerror: () => resolve(null)
+            });
+        });
+    }
+
+    async getLstatus(userId, headers) {
+        const data = await this.getLdata(userId, headers);
+        if (!data || !data.active || !data.active.cohort || !data.active.cohort.rankings) return null;
+        const rankings = data.active.cohort.rankings;
+        const myIndex = rankings.findIndex(r => r.user_id == userId);
+        if (myIndex === -1) return null;
+        return { rank: myIndex + 1, score: rankings[myIndex].score, rankings };
+    }
+
+    async getShop(headers, userId) {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "GET", url: config.api.shop, headers,
+                onload: (res) => {
+                    try {
+                        if (res.status === 200) resolve(JSON.parse(res.responseText).shopItems);
+                        else resolve([]);
+                    } catch (e) { resolve([]); }
                 },
+                onerror: () => resolve(null)
+            });
+        });
+    }
+
+    async buyShop(headers, userId, item) {
+        const user = await this.getUser(userId, headers);
+        const payload = {
+            "itemName": item.id, "isFree": true, "consumed": true,
+            "fromLanguage": user.fromLanguage, "learningLanguage": user.learningLanguage
+        };
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "POST", url: `https://www.duolingo.com/2017-06-30/users/${userId}/shop-items`, headers,
+                data: JSON.stringify(payload),
+                onload: (res) => resolve(res.status === 200),
                 onerror: () => resolve(false)
             });
         });
-        if (success) {
-            successCount++;
-        } else {
-            showDuoRainNotification(`Error granting ${friendlyName}.`);
-            return;
-        }
     }
-    showDuoRainNotification(`Successfully Granted ${successCount}x ${friendlyName}!`);
-}
- 
-async function farmXp(jwt, fromLang, toLang, count) {
-    const farmId = 'xp';
-    if (activeFarms.has(farmId)) return;
-    activeFarms.set(farmId, true);
-    document.querySelectorAll('[data-action="start-xp-farm"]').forEach(btn => {
-        btn.style.pointerEvents = 'none';
-        btn.style.opacity = 0.5;
-    });
-    addFarmUI(farmId, "Starting XP farm...");
-    let totalXp = 0;
-    let loopShouldContinue = true;
-    for (let i = 0; i < count; i++) {
-        if (!activeFarms.get(farmId)) { loopShouldContinue = false; break; }
-        const now_ts = Math.floor(Date.now() / 1000);
-        const payload = { "awardXp": true, "completedBonusChallenge": true, "fromLanguage": fromLang, "learningLanguage": toLang, "hasXpBoost": false, "illustrationFormat": "svg", "isFeaturedStoryInPracticeHub": true, "isLegendaryMode": true, "isV2Redo": false, "isV2Story": false, "masterVersion": true, "maxScore": 0, "score": 0, "happyHourBonusXp": 469, "startTime": now_ts, "endTime": now_ts };
-        await new Promise(resolve => {
-            setTimeout(() => {
-                GM_xmlhttpRequest({
-                    method: "POST", url: "https://stories.duolingo.com/api2/stories/fr-en-le-passeport/complete", headers: getDuoHeaders(jwt), data: JSON.stringify(payload),
-                    onload: res => {
-                        if (res.status === 200 && activeFarms.get(farmId)) {
-                            totalXp += JSON.parse(res.responseText).awardedXp || 0;
-                            updateFarmStatus(farmId, `XP Loop ${i + 1}/${count === Infinity ? '∞' : count} | Total: ${totalXp}`);
-                        } else if (activeFarms.get(farmId)) { updateFarmStatus(farmId, `Error on loop ${i + 1}.`); loopShouldContinue = false; }
-                        resolve();
-                    },
-                    onerror: () => { if (activeFarms.get(farmId)) { updateFarmStatus(farmId, "Request failed."); loopShouldContinue = false; } resolve(); }
-                });
-            }, loopDelay);
-        });
-        if (!loopShouldContinue) break;
-    }
-    stopFarm(farmId, false);
-    finalizeFarmUI(farmId, loopShouldContinue ? `Finished! Total: ${totalXp} XP` : "Stopped due to error.");
-}
- 
-async function farmGems(jwt, uid, fromLang, toLang, count) {
-    const farmId = 'gem';
-    if (activeFarms.has(farmId)) return;
-    activeFarms.set(farmId, true);
-    document.querySelectorAll('[data-action="start-gem-farm"]').forEach(btn => {
-        btn.style.pointerEvents = 'none';
-        btn.style.opacity = 0.5;
-    });
-    addFarmUI(farmId, "Starting Gem farm...");
-    let totalGems = 0;
-    let loopShouldContinue = true;
-    for (let i = 0; i < count; i++) {
-        if (!activeFarms.get(farmId)) { loopShouldContinue = false; break; }
-        for (const reward of ["SKILL_COMPLETION_BALANCED-...-2-GEMS", "SKILL_COMPLETION_BALANCED-...-2-GEMS"]) {
-            await new Promise(resolve => {
-                GM_xmlhttpRequest({
-                    method: 'PATCH', url: `https://www.duolingo.com/2017-06-30/users/${uid}/rewards/${reward}`, headers: getDuoHeaders(jwt), data: JSON.stringify({ "consumed": true, "fromLanguage": fromLang, "learningLanguage": toLang }),
-                    onload: (res) => { if (res.status !== 200) console.warn(`Failed to redeem ${reward}`); resolve(); },
-                    onerror: () => { console.error(`Error redeeming ${reward}`); resolve(); }
-                });
+
+    async buyLegitSuper(headers, userId) {
+        const user = await this.getUser(userId, headers);
+        const payload = {
+            "itemName": "immersive_subscription",
+            "isFree": true,
+            "consumed": true,
+            "fromLanguage": user.fromLanguage,
+            "learningLanguage": user.learningLanguage,
+            "productId": "com.duolingo.immersive_free_trial_subscription"
+        };
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "POST", url: `https://www.duolingo.com/2017-06-30/users/${userId}/shop-items`, headers,
+                data: JSON.stringify(payload),
+                onload: (res) => resolve(res.status === 200 || res.status === 201),
+                onerror: () => resolve(false)
             });
-        }
-        totalGems += 120;
-        updateFarmStatus(farmId, `Gem Loop ${i + 1}/${count === Infinity ? '∞' : count} | Total: ~${totalGems}`);
-        await new Promise(r => setTimeout(r, loopDelay));
-    }
-    stopFarm(farmId, false);
-    finalizeFarmUI(farmId, loopShouldContinue ? `Finished! Total: ~${totalGems} Gems` : "Stopped.");
-}
- 
-async function farmStreak(jwt, uid, fromLang, toLang, days) {
-    const farmId = 'streak';
-    if (activeFarms.has(farmId)) return;
-    activeFarms.set(farmId, true);
-    addFarmUI(farmId, "Getting user data...");
-    const userData = await getUserData(jwt, uid).catch(() => {
-        stopFarm(farmId, false);
-        finalizeFarmUI(farmId, "Error: Could not get user data.");
-        return null;
-    });
-    if (!userData) {
-        stopFarm(farmId, false);
-        finalizeFarmUI(farmId, "Error: Could not get user data.");
-        return;
-    }
-    document.querySelectorAll('[data-action="start-streak-farm"]').forEach(btn => {
-        btn.style.pointerEvents = 'none';
-        btn.style.opacity = 0.5;
-    });
-    const startDate = userData.streakStartDate ? new Date(userData.streakStartDate) : new Date();
-    let loopShouldContinue = true;
-    for (let i = 0; i < days; i++) {
-        if (!activeFarms.get(farmId)) { loopShouldContinue = false; break; }
-        const simDay = new Date(startDate);
-        simDay.setDate(simDay.getDate() - i);
-        updateFarmStatus(farmId, `Farming ${simDay.toISOString().split('T')[0]} | Day ${i+1}/${days === Infinity ? '∞' : days}`);
-        await new Promise(resolve => {
-            setTimeout(() => {
-                GM_xmlhttpRequest({
-                    method: 'POST', url: "https://www.duolingo.com/2017-06-30/sessions", headers: getDuoHeaders(jwt), data: JSON.stringify({ "challengeTypes": [], "fromLanguage": fromLang, "isFinalLevel": false, "isV2": true, "juicy": true, "learningLanguage": toLang, "type": "GLOBAL_PRACTICE" }),
-                    onload: (r1) => {
-                        if (r1.status !== 200) { console.error(`POST fail for ${simDay.toISOString().split('T')[0]}`); return resolve(); }
-                        const sessionData = JSON.parse(r1.responseText);
-                        const putPayload = { ...sessionData, "heartsLeft": 5, "startTime": Math.floor(simDay.getTime() / 1000 - 60), "endTime": Math.floor(simDay.getTime() / 1000), "failed": false };
-                        GM_xmlhttpRequest({ method: 'PUT', url: `https://www.duolingo.com/2017-06-30/sessions/${sessionData.id}`, headers: getDuoHeaders(jwt), data: JSON.stringify(putPayload), onload: resolve, onerror: resolve });
-                    },
-                    onerror: resolve
-                });
-            }, loopDelay);
         });
-        if (!loopShouldContinue) break;
     }
-    stopFarm(farmId, false);
-    finalizeFarmUI(farmId, loopShouldContinue ? "🎉 Streak farming complete!" : "Stopped.");
-}
- 
-function fetchAllMetrics(jwt) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: 'https://goals-api.duolingo.com/schema?ui_language=en',
-            headers: getDuoHeaders(jwt),
-            timeout: 15000,
-            ontimeout: () => reject(new Error('Request timed out while fetching metrics')),
-            onload: res => {
-                if (res.status === 200) {
-                    try {
-                        const schema = JSON.parse(res.responseText);
-                        const metrics = new Set(schema.goals.map(g => g.metric).filter(Boolean));
-                        resolve(metrics);
-                    } catch (e) {
-                        console.error("DuoRain Error: Could not parse schema. Raw response:", res.responseText);
-                        reject(new Error('Failed to parse schema response.'));
-                    }
-                } else {
-                    console.error(`DuoRain Error: Failed to fetch metrics. Status: ${res.status}. Response:`, res.responseText);
-                    reject(new Error(`Failed to fetch metrics (Status: ${res.status})`));
-                }
-            },
-            onerror: (err) => {
-                console.error("DuoRain Error: Network error fetching metrics.", err);
-                reject(new Error('Network error fetching metrics.'))
-            }
-        });
-    });
-}
- 
-function postProgressUpdate(jwt, uid, payload) {
-    return new Promise(resolve => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: `https://goals-api.duolingo.com/users/${uid}/progress/batch`,
-            headers: getDuoHeaders(jwt),
-            data: JSON.stringify(payload),
-            timeout: 15000,
-            ontimeout: () => resolve(false),
-            onload: (res) => resolve(res.status === 200),
-            onerror: () => resolve(false)
-        });
-    });
-}
- 
-function generateQuestDates() {
-    const dates = [];
-    const now = new Date();
-    const startDay = now.getDate();
-    const endDate = new Date(2021, 0, 1);
-    let currentDate = new Date(now);
-    while (currentDate >= endDate) {
-        let targetDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), startDay, now.getHours(), now.getMinutes(), now.getSeconds());
-        if (targetDate.getMonth() !== currentDate.getMonth()) {
-            targetDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
-        }
-        dates.push(targetDate);
-        currentDate.setDate(1);
-        currentDate.setMonth(currentDate.getMonth() - 1);
-    }
-    return dates;
-}
- 
-async function runFullQuestCompletion(jwt, uid, timezone) {
-    const farmId = 'fullquests';
-    if (activeFarms.has(farmId)) return;
-    activeFarms.set(farmId, true);
-    document.querySelectorAll('[data-action="run-full-quests"]').forEach(btn => {
-        btn.style.opacity = 0.5;
-        btn.style.pointerEvents = 'none';
-    });
-    addFarmUI(farmId, 'Starting full completion process...');
-    try {
-        updateFarmStatus(farmId, 'Fetching quest metrics...');
-        const metrics = await fetchAllMetrics(jwt);
-        if (!metrics || metrics.size === 0) {
-            throw new Error('No quest metrics found in schema.');
-        }
-        const dates = generateQuestDates();
-        updateFarmStatus(farmId, `Found ${dates.length} months to process...`);
-        const metricUpdates = [...metrics].map(m => ({ "metric": m, "quantity": 2000 }));
-        if (!metrics.has("QUESTS")) {
-            metricUpdates.push({ "metric": "QUESTS", "quantity": 1 });
-        }
-        let successCount = 0;
-        for (let i = 0; i < dates.length; i++) {
-            if (!activeFarms.get(farmId)) {
-                finalizeFarmUI(farmId, 'Process stopped by user.');
-                stopFarm(farmId, false);
-                return;
-            }
-            const targetDate = dates[i];
-            const monthStr = targetDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-            updateFarmStatus(farmId, `[${i + 1}/${dates.length}] Submitting for ${monthStr}...`);
-            const timestamp = targetDate.toISOString();
-            const payload = { "metric_updates": metricUpdates, "timestamp": timestamp, "timezone": timezone };
-            const success = await postProgressUpdate(jwt, uid, payload);
-            if (success) {
-                successCount++;
-            } else {
-                console.warn(`DuoRain: POST for ${timestamp} failed.`);
-            }
-            await new Promise(r => setTimeout(r, 1000));
-        }
-        finalizeFarmUI(farmId, `Finished! Processed ${dates.length} updates with ${successCount} successes.`);
-    } catch (e) {
-        console.error('DuoRain: Full quest completion error:', e);
-        finalizeFarmUI(farmId, `Error: ${e.message || 'An unknown error occurred'}`);
-    }
-    stopFarm(farmId, false);
-}
- 
-function initializeSettings() {
-    const loopDelayInput = document.getElementById('duorain-loop-delay-input');
-    loopDelayInput.value = settings.loopDelay;
- 
-    loopDelayInput.addEventListener('change', () => {
-        const newValue = parseInt(loopDelayInput.value, 10);
-        if (!isNaN(newValue) && newValue >= 0) {
-            loopDelay = newValue;
-            settings.loopDelay = newValue;
-            saveSettings();
-        } else {
-            loopDelayInput.value = settings.loopDelay;
-        }
-    });
- 
-     const easySolveSwitch = document.getElementById('duorain-easy-solve-switch');
-    if (sessionStorage.getItem(MODIFIER_KEY) === 'true' && !sessionStorage.getItem(AUTO_CLICK_KEY)) {
-        easySolveSwitch.checked = true;
-    }
-     easySolveSwitch.addEventListener('change', () => {
-        if(activeFarms.size > 0){
-             showDuoRainNotification("Please stop all running tasks before toggling Easy Solve.");
-             easySolveSwitch.checked = !easySolveSwitch.checked;
-             return;
-        }
-        settings.easySolve = easySolveSwitch.checked;
-        saveSettings();
-        if (settings.easySolve) {
-            sessionStorage.setItem(MODIFIER_KEY, 'true');
-            sessionStorage.removeItem(AUTO_CLICK_KEY);
-        } else {
-            sessionStorage.removeItem(MODIFIER_KEY);
-            sessionStorage.removeItem(AUTO_CLICK_KEY);
-        }
-        showDuoRainNotification(`Easy Solve ${settings.easySolve ? 'enabled' : 'disabled'}. Reloading...`);
-        setTimeout(() => {
-             sessionStorage.setItem(RELOAD_FLAG, 'true');
-             window.location.reload();
-        }, 1000);
-    });
- 
-    const incrementButton = document.getElementById('duorain-delay-increment');
-    const decrementButton = document.getElementById('duorain-delay-decrement');
-    let holdTimeout;
-    let holdInterval;
- 
-    const updateDelayValue = (amount) => {
-        const currentValue = parseInt(loopDelayInput.value, 10) || 0;
-        const newValue = Math.max(0, currentValue + amount);
-        loopDelayInput.value = newValue;
-        loopDelayInput.dispatchEvent(new Event('change'));
-    };
- 
-    const startHold = (amount, button) => {
-        stopHold();
-        holdTimeout = setTimeout(() => {
-            holdInterval = setInterval(() => {
-                updateDelayValue(amount);
-            }, 100);
-        }, 400);
-    };
- 
-    const stopHold = () => {
-        clearTimeout(holdTimeout);
-        clearInterval(holdInterval);
-    };
- 
-    const addListeners = (button, amount) => {
-        button.addEventListener('mousedown', (e) => { e.preventDefault(); updateDelayValue(amount); startHold(amount, button); });
-        button.addEventListener('mouseup', stopHold);
-        button.addEventListener('mouseleave', stopHold);
-        button.addEventListener('touchstart', (e) => { e.preventDefault(); updateDelayValue(amount); startHold(amount, button); }, { passive: false });
-        button.addEventListener('touchend', stopHold);
-    };
- 
-    addListeners(incrementButton, 1);
-    addListeners(decrementButton, -1);
-}
- 
-function initializeAutoClicker() {
-    const CONTINUE_SELECTORS = ['[data-test="start-button"]', '[data-test="story-start"]', '[data-test="stories-player-continue"]:not([disabled])', '[data-test="stories-player-done"]:not([disabled])', '[data-test="player-next"]:not([aria-disabled="true"])', '[data-test="session-complete-slide"] [data-test="player-next"]', '[data-test="legendary-session-end-continue"]', 'button._1rcV8._1gKir:not([disabled])'];
-    const ANSWER_SELECTORS = ['[data-test="challenge-choice"][tabindex="0"]', '[data-test*="challenge-tap-token"]', '[data-test="challenge-image-choice"]', '[data-test="challenge-choice"]'];
-    setInterval(() => {
-        if (sessionStorage.getItem(AUTO_CLICK_KEY) !== 'true') return;
-        const allButtons = document.querySelectorAll('button');
-        for (const button of allButtons) {
-            if (button.innerText && button.innerText.trim().toLowerCase() === 'no thanks' && !button.disabled) { button.click(); return; }
-        }
-        for (const selector of CONTINUE_SELECTORS) {
-            const button = document.querySelector(selector);
-            if (button) { button.click(); return; }
-        }
-        const isContinueButtonActive = document.querySelector('[data-test="player-next"]:not([aria-disabled="true"])');
-        if (isContinueButtonActive) return;
-        for (const selector of ANSWER_SELECTORS) {
-            if (selector.includes('challenge-tap-token')) {
-                const tokens = document.querySelectorAll(selector + ':not([aria-disabled="true"])');
-                if (tokens.length > 0) { tokens.forEach(token => token.click()); return; }
-            } else {
-                const answerButton = document.querySelector(selector + ':not([aria-disabled="true"])');
-                if (answerButton) { answerButton.click(); return; }
-            }
-        }
-    }, 200);
-}
- 
-function startSolverSession(farmId, count, lessonParams = {}) {
-     if (activeFarms.size > 0) {
-        showDuoRainNotification("Another task is already running.");
-        return;
-    }
- 
-    let url;
-    switch (farmId) {
-        case 'path-solve':
-            url = '/lesson';
-            break;
-        case 'practice-solve':
-            url = '/practice';
-            break;
-        case 'listen-solve':
-            url = '/practice-hub/listening-practice';
-            break;
-        case 'lesson-solve':
-             if (lessonParams.unit && lessonParams.level) {
-                url = `/lesson/unit/${lessonParams.unit}/level/${lessonParams.level}`;
-            } else {
-                showDuoRainNotification("Please specify Unit and Lesson number.");
-                return;
-            }
-            break;
-        default:
-            showDuoRainNotification("Unknown solver type.");
-            return;
-    }
- 
-    activeFarms.set(farmId, true);
-    sessionStorage.setItem(MODIFIER_KEY, 'true');
-    sessionStorage.setItem(AUTO_CLICK_KEY, 'true');
-    sessionStorage.setItem(SOLVER_SESSION_KEY, JSON.stringify({
-        farm: farmId,
-        remaining: count,
-        total: count
-    }));
-    showDuoRainNotification(`Starting ${farmId.replace('-solve','')} solver...`);
-    window.location.href = `https://duolingo.com${url}`;
-}
- 
-function checkActiveSolverSession() {
-    const sessionDataJSON = sessionStorage.getItem(SOLVER_SESSION_KEY);
-    if (!sessionDataJSON) return;
- 
-    try {
-        const { farm, remaining, total } = JSON.parse(sessionDataJSON);
- 
-        if (document.body) {
-             addFarmUI(farm, `Solving... (${total - (remaining === Infinity ? 0 : remaining) + (total === Infinity ? 1 : 0)}/${total === Infinity ? '∞' : total})`);
-        } else {
-            document.addEventListener('DOMContentLoaded', () => {
-                addFarmUI(farm, `Solving... (${total - (remaining === Infinity ? 0 : remaining) + (total === Infinity ? 1 : 0)}/${total === Infinity ? '∞' : total})`);
+
+    async getGoals(headers) {
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "GET", url: `${config.api.goals}/schema?ui_language=en&_=${Date.now()}`, headers,
+                onload: (res) => resolve(res.status === 200 ? JSON.parse(res.responseText) : null),
+                onerror: () => resolve(null)
             });
-        }
- 
-        const observer = new MutationObserver((mutations) => {
-            if (document.querySelector('[data-test="session-complete-slide"]')) {
-                observer.disconnect();
-                handleLessonCompletion(farm, remaining, total);
-            }
         });
- 
-        if (document.body) {
-            observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    async getUserProgress(userId, headers) {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "GET", url: `${config.api.goals}/users/${userId}/progress?timezone=${tz}&ui_language=en`, headers,
+                onload: (res) => resolve(res.status === 200 ? JSON.parse(res.responseText) : null),
+                onerror: () => resolve(null)
+            });
+        });
+    }
+
+    async updateGoal(userId, headers, metric, amount, goalId) {
+        const payload = {
+            "metric_updates": [{ "metric": metric, "quantity": amount }],
+            "timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+            "timestamp": this.getQuestTimestamp(goalId)
+        };
+
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "POST", url: `${config.api.goals}/users/${userId}/progress/batch`, headers,
+                data: JSON.stringify(payload),
+                onload: (res) => resolve(res.status === 200),
+                onerror: () => resolve(false)
+            });
+        });
+    }
+
+    async bruteForceGoals(userId, headers, metrics) {
+        const updates = metrics.map(m => ({ "metric": m, "quantity": 2000 }));
+        updates.push({ "metric": "QUESTS", "quantity": 1 });
+
+        const payload = {
+            "metric_updates": updates,
+            "timezone": Intl.DateTimeFormat().resolvedOptions().timeZone,
+            "timestamp": new Date().toISOString()
+        };
+
+        return new Promise(resolve => {
+            GM_xmlhttpRequest({
+                method: "POST", url: `${config.api.goals}/users/${userId}/progress/batch`, headers,
+                data: JSON.stringify(payload),
+                onload: (res) => resolve(res.status === 200),
+                onerror: () => resolve(false)
+            });
+        });
+    }
+
+    formatTime(ms) {
+        if (ms < 1000) return `${ms} ms`;
+        const m = Math.floor(ms / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
+        return (m > 0 ? `${m} m ` : '') + (s > 0 || m === 0 ? `${s} s` : '');
+    }
+
+    stopTask(type) {
+        const startTime = this.taskTimers.get(type);
+        if (startTime) {
+            const duration = this.formatTime(Date.now() - startTime);
+            this.interruptedTasks.set(type, duration);
+            this.taskTimers.delete(type);
+        }
+        this.activeTasks.delete(type);
+        this.taskProgress.delete(type);
+        this.toggleRunBtn(this.getBtnId(type), false);
+        this.updateDashRightCard();
+
+        let name = "Unknown Task";
+        if(type === 'xp') name = "XP Farm";
+        if(type === 'gem') name = "Gem Farm";
+        if(type === 'streak') name = "Streak Farm";
+        if(type === 'league') name = "League Saver";
+        GlobalNotif("DuoRain Active", `${name} Stopped`);
+    }
+
+    dismissInterrupted(type) {
+        this.interruptedTasks.delete(type);
+        this.updateDashRightCard();
+    }
+
+    getBtnId(type) {
+        if(type === 'xp') return 'xp-btn-run';
+        if(type === 'gem') return 'gem-btn-run';
+        if(type === 'streak') return 'streak-btn-run';
+        if(type === 'league') return 'league-btn-run';
+        return '';
+    }
+
+    toggleRunBtn(id, isRunning) {
+        const btn = document.getElementById(id);
+        if(!btn) return;
+        if(isRunning) {
+            btn.innerHTML = "STOP";
+            btn.classList.add('stop');
         } else {
-            document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
+            btn.innerHTML = "RUN";
+            btn.classList.remove('stop', 'disabled');
         }
-    } catch (e) {
-        console.error("DuoRain Error parsing solver session:", e);
-        sessionStorage.removeItem(SOLVER_SESSION_KEY);
     }
-}
- 
-function handleLessonCompletion(farm, remaining, total) {
-     if (remaining !== Infinity) {
-        remaining--;
-    }
- 
-    if ((remaining > 0 || remaining === Infinity) && activeFarms.has(farm)) {
-         sessionStorage.setItem(SOLVER_SESSION_KEY, JSON.stringify({ farm, remaining, total }));
-         setTimeout(() => {
-             window.location.reload();
-         }, 1500);
-    } else {
-         stopFarm(farm, false);
-         finalizeFarmUI(farm, "Finished! Returning to learn page...");
-         setTimeout(() => {
-              window.location.href = "https://duolingo.com/learn";
-         }, 1500);
-    }
-}
- 
-async function main() {
- 
-    if (window.location.pathname.includes('/lesson') || window.location.pathname.includes('/practice')) {
-         checkActiveSolverSession();
-    }
- 
-    injectUI();
-    loadSettings();
-    initializeSettings();
-    renderItems();
-    setupPinEventListeners();
-    renderSolverItems();
-    setupSolverPinEventListeners();
- 
-    const jwt = getJwtToken();
-    const indicatorText = document.getElementById('duorain-status-indicator-text');
-    if (!jwt || !parseJwt(jwt)?.sub) {
-        indicatorText.textContent = 'Error: Not logged in.';
-        document.querySelectorAll('.DLP_VStack_8').forEach(el => {
-            el.style.opacity = 0.5;
-            el.style.pointerEvents = 'none';
-        });
-        return;
-    }
- 
-    const userId = parseJwt(jwt).sub;
-    const duolingoUserData = await getUserData(jwt, userId);
- 
-    if (!duolingoUserData) {
-         indicatorText.textContent = 'Error: Failed to load user data.';
-         document.querySelectorAll('.DLP_VStack_8').forEach(el => {
-            el.style.opacity = 0.5;
-            el.style.pointerEvents = 'none';
-        });
-        return;
-    }
- 
-    document.getElementById('duorain-main-container').addEventListener('click', (e) => {
-        const button = e.target.closest('[data-action]');
-        if (!button) return;
- 
-        const action = button.dataset.action;
-        const farmType = action.replace('start-', '').replace('-farm', '').replace('run-', '').replace('grant-', '');
-        const featureItem = button.closest('.duorain-feature-item');
-        let count;
- 
- 
-        if (featureItem && featureItem.dataset.mode === 'infinity') {
-            count = Infinity;
-        } else {
-            const input = featureItem ? featureItem.querySelector(`.duorain-value-input[data-input-for="${farmType}"]`) : null;
-            count = input ? (input.value ? parseInt(input.value, 10) : 1) : 1;
+
+    updateDashRightCard() {
+        const card = document.getElementById('dash-card-content');
+        if(!card) return;
+
+        if (this.activeTasks.size === 0 && this.interruptedTasks.size === 0) {
+            card.innerHTML = `<span class="label" style="margin-bottom:5px">INFO</span><div style="color:var(--eel); font-weight:600">Current League Position</div><div class="big-rank" id="dq-rank" style="margin-top:10px">...</div><div class="q-text" id="dq-league-xp" style="margin-top:auto; align-self:flex-start; color:var(--wolf)">... XP</div>`;
+            document.getElementById('_refresh_profile')?.click();
+            return;
         }
- 
-       if (action.includes('-solve')) {
-            const lessonParams = {};
-            if (action === 'start-lesson-solve' && featureItem) {
-                const unitInput = featureItem.querySelector('[data-input-for="lesson-unit"]');
-                const levelInput = featureItem.querySelector('[data-input-for="lesson-level"]');
-                lessonParams.unit = unitInput ? unitInput.value : 1;
-                lessonParams.level = levelInput ? levelInput.value : 1;
+
+        let html = `<span class="label" style="margin-bottom:10px">TASKS</span><div style="width:100%;overflow-y:auto;">`;
+
+        this.activeTasks.forEach(task => {
+            let name = "Unknown";
+            let prog = "";
+            const info = this.taskProgress.get(task);
+
+            if(task === 'xp') name = "XP Farm";
+            if(task === 'gem') name = "Gem Farm";
+            if(task === 'streak') name = "Streak Farm";
+            if(task === 'league') name = "League Saver";
+
+            if(info) {
+                if(task === 'league') prog = `<span style="font-size:12px;color:var(--wolf);margin-right:5px;">Checking...</span>`;
+                else prog = `<span style="font-size:12px;color:var(--wolf);margin-right:5px;">${info.current} / ${info.total}</span>`;
             }
-             if ((isNaN(count) || count <= 0) && count !== Infinity) {
-                showDuoRainNotification("Please enter a valid number of loops.");
+
+            html += `
+                <div class="task-item">
+                    <div class="task-info">
+                        ${name}
+                        <div class="dr-spinner"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;">
+                        ${prog}
+                        <button class="mini-stop" data-task="${task}" data-action="stop">STOP</button>
+                    </div>
+                </div>
+            `;
+        });
+
+        this.interruptedTasks.forEach((time, task) => {
+            let name = "Unknown";
+            if(task === 'xp') name = "XP Farm";
+            if(task === 'gem') name = "Gem Farm";
+            if(task === 'streak') name = "Streak Farm";
+            if(task === 'league') name = "League Saver";
+
+            html += `
+                <div class="task-item" style="border-color:#FF4B4B;">
+                    <div class="task-info">
+                        ${name}
+                    </div>
+                    <div style="display:flex;align-items:center;">
+                        <span class="interrupted-text">INTERRUPTED • ${time}</span>
+                        <button class="mini-stop close" data-task="${task}" data-action="dismiss">✕</button>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div>`;
+        card.innerHTML = html;
+
+        card.querySelectorAll('.mini-stop').forEach(btn => {
+            btn.onclick = (e) => {
+                const action = e.target.dataset.action;
+                const task = e.target.dataset.task;
+                if(action === 'stop') this.stopTask(task);
+                if(action === 'dismiss') this.dismissInterrupted(task);
+            };
+        });
+    }
+
+    updateStats(type, status, target, total, left, time, pct, taken, extra = "") {
+        const box = document.getElementById(`${type}-status-text`);
+        const bar = document.getElementById(`${type}-prog-bar`);
+
+        if(total && total !== '...') {
+             let cur = (typeof total === 'number' && typeof left === 'number') ? (total - left) : 0;
+             this.taskProgress.set(type, { current: cur, total: total });
+             this.updateDashRightCard();
+        }
+
+        if (!box || !bar) return;
+        const lbl = type === 'xp' ? 'Target XP' : type === 'gem' ? 'Target Gems' : type === 'streak' ? 'Target Days' : 'Target Position';
+        const loopsLbl = type === 'streak' ? 'Days to farm' : 'Loops to run';
+        const leftLbl = type === 'streak' ? 'Days left' : 'Loops left';
+        let h = `STATUS: ${status}<br>${lbl}: ${target || 'none'}<br>`;
+        if (type === 'league') h += `Target XP: ${extra}<br>`;
+        h += `${loopsLbl}: ${total}<br>${leftLbl}: ${left}<br>Estimated Time left: ${time}<br>Time taken: ${taken}`;
+        box.innerHTML = h;
+        bar.style.width = `${pct}%`;
+    }
+
+    updateDash(data, isPrivate) {
+        const el = (id) => document.getElementById(id);
+        if (el('_username')) el('_username').innerText = data.username;
+        if (el('_user_details')) el('_user_details').innerHTML = `${data.fromLanguage} ${assets.icons.arrow} ${data.learningLanguage}`;
+        if (el('_current_xp')) el('_current_xp').innerText = data.totalXp.toLocaleString();
+        if (el('_current_streak')) el('_current_streak').innerText = data.streak.toLocaleString();
+        if (el('_current_gems')) el('_current_gems').innerText = data.gems.toLocaleString();
+        if (el('_privacy_toggle') && el('_privacy_label')) {
+            el('_privacy_toggle').checked = isPrivate;
+            el('_privacy_label').innerText = isPrivate ? "PRIVATE" : "PUBLIC";
+        }
+        if (data.picture) {
+            let hq = data.picture.replace(/\/(medium|large|small)$/, '/xlarge');
+            if (!hq.endsWith('/xlarge') && hq.includes('duolingo.com/ssr-avatars')) hq += '/xlarge';
+            if (document.querySelector('._avatar')) {
+                const av = document.querySelector('._avatar');
+                av.innerHTML = `<img src="${hq}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" draggable="false">`;
+            }
+        }
+    }
+
+    async runXP(amount, delayMs, uiType = 'xp') {
+        const btnId = uiType === 'league' ? 'league-btn-run' : 'xp-btn-run';
+        if (this.activeTasks.has(uiType)) {
+            this.stopTask(uiType);
+            return;
+        }
+
+        const token = this.getJWT();
+        if (!token) { GlobalPopup("Please login."); return; }
+        const sub = this.decJWT(token).sub;
+        const headers = this.formatHeads(token);
+
+        this.activeTasks.add(uiType);
+        this.taskTimers.set(uiType, Date.now());
+        this.toggleRunBtn(btnId, true);
+        this.updateDashRightCard();
+
+        GlobalNotif("DuoRain Active", "XP Farm is now running!");
+        const startTime = Date.now();
+        this.updateStats(uiType, "Initializing...", amount, "...", "...", "...", 0, "...", amount);
+
+        const user = await this.getUser(sub, headers);
+        let txp = parseInt(amount);
+        const min = 30, max = 499;
+        if (txp < min) txp = min;
+        let mReq = Math.floor(txp / max);
+        let rem = txp % max;
+        if (rem > 0 && rem < min && mReq > 0) { mReq--; rem += max; }
+        const total = mReq + (rem >= min ? 1 : 0);
+        let cur = 0;
+        const delay = delayMs || 100;
+
+        const loop = async (xp, hh) => {
+            const now = Math.floor(Date.now() / 1000);
+            const dur = Math.floor(Math.random() * 121 + 300);
+            const payload = {
+                "awardXp": true, "completedBonusChallenge": true, "fromLanguage": user.fromLanguage,
+                "learningLanguage": user.learningLanguage, "hasXpBoost": false, "illustrationFormat": "svg",
+                "isFeaturedStoryInPracticeHub": true, "isLegendaryMode": true, "isV2Redo": false,
+                "isV2Story": false, "masterVersion": true, "maxScore": 0, "score": 0, "happyHourBonusXp": hh,
+                "startTime": now, "endTime": now + dur
+            };
+            return new Promise(r => GM_xmlhttpRequest({
+                method: "POST", url: `${config.api.stories}/fr-en-le-passeport/complete`, headers,
+                data: JSON.stringify(payload), onload: res => r(res.status === 200), onerror: () => r(false)
+            }));
+        };
+
+        for (let i = 0; i < mReq; i++) {
+            if (!this.activeTasks.has(uiType)) break;
+            cur++;
+            const lLeft = total - cur;
+            const pct = (cur / total) * 100;
+            this.updateStats(uiType, "RUNNING XP", (uiType === 'league' ? `XP ${amount}` : txp), total, lLeft, (lLeft * (delay / 1000)).toFixed(1) + "s", pct, "...", amount);
+            await loop(0, 469);
+            await new Promise(r => setTimeout(r, delay));
+        }
+
+        if (rem >= min && this.activeTasks.has(uiType)) {
+            cur++;
+            this.updateStats(uiType, "FINISHING...", (uiType === 'league' ? `XP ${amount}` : txp), total, 0, "0s", 100, "...", amount);
+            await loop(0, Math.min(Math.max(0, rem - min), 469));
+        }
+
+        if(this.activeTasks.has(uiType)) {
+            this.activeTasks.delete(uiType);
+            this.taskProgress.delete(uiType);
+            this.taskTimers.delete(uiType);
+            this.toggleRunBtn(btnId, false);
+            this.updateStats(uiType, "COMPLETED", (uiType === 'league' ? `XP ${amount}` : txp), total, 0, "0s", 100, this.formatTime(Date.now() - startTime), amount);
+            this.updateDashRightCard();
+            GlobalNotif("DuoRain Active", `Finished farming ${txp} XP`);
+            document.getElementById('_refresh_profile')?.click();
+        }
+    }
+
+    async runGem(loops, delayMs) {
+        if (this.activeTasks.has('gem')) {
+            this.stopTask('gem');
+            return;
+        }
+
+        const token = this.getJWT();
+        if (!token) { GlobalPopup("Please login."); return; }
+        const sub = this.decJWT(token).sub;
+        const headers = this.formatHeads(token);
+
+        this.activeTasks.add('gem');
+        this.taskTimers.set('gem', Date.now());
+        this.toggleRunBtn('gem-btn-run', true);
+        this.updateDashRightCard();
+
+        GlobalNotif("DuoRain Active", "Gem Farm is now running!");
+        const startTime = Date.now();
+        const total = loops * 60;
+        this.updateStats('gem', "Initializing...", total, loops, loops, "...", 0, "...");
+
+        const user = await this.getUser(sub, headers);
+        const rewards = ["SKILL_COMPLETION_BALANCED-…-2-GEMS", "SKILL_COMPLETION_BALANCED-…-2-GEMS"];
+        let cur = 0;
+
+        for (let i = 0; i < loops; i++) {
+            if (!this.activeTasks.has('gem')) break;
+            cur++;
+            const left = loops - cur;
+            const pct = (cur / loops) * 100;
+            this.updateStats('gem', "RUNNING", total, loops, left, (left * ((delayMs || 500) / 1000)).toFixed(1) + "s", pct, "...");
+            for (const r of rewards) {
+                await new Promise(res => GM_xmlhttpRequest({
+                    method: "PATCH", url: `${config.api.users}/${sub}/rewards/${r}`, headers,
+                    data: JSON.stringify({ consumed: true, fromLanguage: user.fromLanguage, learningLanguage: user.learningLanguage }),
+                    onload: () => res(), onerror: () => res()
+                }));
+            }
+            await new Promise(r => setTimeout(r, delayMs || 500));
+        }
+
+        if(this.activeTasks.has('gem')) {
+            this.activeTasks.delete('gem');
+            this.taskProgress.delete('gem');
+            this.taskTimers.delete('gem');
+            this.toggleRunBtn('gem-btn-run', false);
+            this.updateStats('gem', "COMPLETED", total, loops, 0, "0s", 100, this.formatTime(Date.now() - startTime));
+            this.updateDashRightCard();
+            GlobalNotif("DuoRain Active", `Finished farming ${total} Gems`);
+            document.getElementById('_refresh_profile')?.click();
+        }
+    }
+
+    async runStreak(amount, delayMs) {
+        if (this.activeTasks.has('streak')) {
+            this.stopTask('streak');
+            return;
+        }
+        const token = this.getJWT();
+        if (!token) { GlobalPopup("Please login."); return; }
+        const sub = this.decJWT(token).sub;
+        const headers = this.formatHeads(token);
+
+        this.activeTasks.add('streak');
+        this.taskTimers.set('streak', Date.now());
+        this.toggleRunBtn('streak-btn-run', true);
+        this.updateDashRightCard();
+
+        GlobalNotif("DuoRain Active", "Streak Farm is now running!");
+        const startTime = Date.now();
+        this.updateStats('streak', "Initializing...", amount, amount, amount, "...", 0, "...");
+
+        const user = await this.getUser(sub, headers);
+        let farmStart;
+        if (!user.streakData || !user.streakData.currentStreak) {
+            const n = new Date();
+            n.setDate(n.getDate() - 1);
+            farmStart = n;
+        } else {
+            try {
+                const s = new Date(user.streakData.currentStreak.startDate);
+                s.setDate(s.getDate() - 1);
+                farmStart = s;
+            } catch (e) {
+                GlobalPopup("Error parsing date.");
+                this.activeTasks.delete('streak');
+                this.taskProgress.delete('streak');
+                this.taskTimers.delete('streak');
+                this.toggleRunBtn('streak-btn-run', false);
+                this.updateDashRightCard();
                 return;
             }
-            startSolverSession(farmType, count, lessonParams);
+        }
+
+        let dCnt = 0;
+        for (let i = 0; i < amount; i++) {
+            if (!this.activeTasks.has('streak')) break;
+            dCnt++;
+            const left = amount - dCnt;
+            const pct = (dCnt / amount) * 100;
+            this.updateStats('streak', "RUNNING", amount, amount, left, (left * ((delayMs || 100) / 1000)).toFixed(1) + "s", pct, "...");
+            let simDay = new Date(farmStart);
+            simDay.setDate(simDay.getDate() - i);
+            const end = Math.floor(simDay.getTime() / 1000);
+            let sess = null;
+            await new Promise(r => GM_xmlhttpRequest({
+                method: "POST", url: config.api.sessions, headers,
+                data: JSON.stringify({
+                    "challengeTypes": config.chBody, "fromLanguage": user.fromLanguage || 'en',
+                    "isFinalLevel": false, "isV2": true, "juicy": true, "learningLanguage": user.learningLanguage || 'fr',
+                    "smartTipsVersion": 2, "type": "GLOBAL_PRACTICE"
+                }),
+                onload: (res) => { if (res.status === 200) sess = JSON.parse(res.responseText); r(); },
+                onerror: () => r()
+            }));
+
+            if (sess && sess.id) {
+                await new Promise(r => GM_xmlhttpRequest({
+                    method: "PUT", url: `${config.api.sessions}/${sess.id}`, headers,
+                    data: JSON.stringify({
+                        ...sess, "heartsLeft": 5, "startTime": end - 1, "endTime": end,
+                        "enableBonusPoints": false, "failed": false, "maxInLessonStreak": 9, "shouldLearnThings": true
+                    }),
+                    onload: () => r(), onerror: () => r()
+                }));
+            }
+            await new Promise(r => setTimeout(r, delayMs || 100));
+        }
+
+        if(this.activeTasks.has('streak')) {
+            this.activeTasks.delete('streak');
+            this.taskProgress.delete('streak');
+            this.taskTimers.delete('streak');
+            this.toggleRunBtn('streak-btn-run', false);
+            this.updateStats('streak', "COMPLETED", amount, amount, 0, "0s", 100, this.formatTime(Date.now() - startTime));
+            this.updateDashRightCard();
+            GlobalNotif("DuoRain Active", `Restored ${amount} Streak days`);
+            document.getElementById('_refresh_profile')?.click();
+        }
+    }
+
+    async runLeague(tRank, delayMs, bufferXP) {
+        if (this.activeTasks.has('league')) {
+            this.stopTask('league');
             return;
         }
- 
-        if ( (isNaN(count) || count <= 0) && !action.startsWith('grant-') && action !== 'run-fullquests') {
-            showDuoRainNotification("Please enter a valid number of loops.");
-            return;
-        }
- 
-        const { fromLanguage, learningLanguage, timezone } = duolingoUserData;
-        switch(action) {
-            case 'start-xp-farm': farmXp(jwt, fromLanguage, 'fr', count); break;
-            case 'start-gem-farm': farmGems(jwt, userId, fromLanguage, learningLanguage, count); break;
-            case 'start-streak-farm': farmStreak(jwt, userId, fromLanguage, learningLanguage, count); break;
-            case 'run-fullquests': runFullQuestCompletion(jwt, userId, timezone); break;
-            case 'grant-streak-freeze': {
-                const freezeCount = parseInt(document.getElementById('duorain-freeze-value').textContent, 10);
-                if (freezeCount > 0) {
-                    grantShopItem(jwt, userId, fromLanguage, learningLanguage, 'streak_freeze', 'Streak Freeze', freezeCount);
-                } else {
-                    showDuoRainNotification("Please select at least 1 Streak Freeze.");
-                }
+        const token = this.getJWT();
+        if (!token) { GlobalPopup("Please login."); return; }
+        const sub = this.decJWT(token).sub;
+        const headers = this.formatHeads(token);
+
+        this.activeTasks.add('league');
+        this.taskTimers.set('league', Date.now());
+        this.toggleRunBtn('league-btn-run', true);
+        this.updateDashRightCard();
+
+        GlobalNotif("DuoRain Active", "League Saver Started");
+        this.updateStats('league', "Checking Rank...", `# ${tRank}`, "...", "...", "...", 0, "...", "...");
+
+        while (true) {
+            if(!this.activeTasks.has('league')) break;
+            const s = await this.getLstatus(sub, headers);
+            if (!s) { GlobalPopup("Failed to fetch leaderboard."); break; }
+            document.getElementById('league-current-rank').innerText = `# ${s.rank}`;
+            if (s.rank <= tRank) {
+                this.updateStats('league', "GOAL REACHED", `# ${tRank}`, 0, 0, "0s", 100, "Done!", "0");
                 break;
             }
-            case 'grant-hearts': grantShopItem(jwt, userId, fromLanguage, learningLanguage, 'health_refill', 'Heart Refill'); break;
-            case 'grant-xp-boost': grantShopItem(jwt, userId, fromLanguage, learningLanguage, 'general_xp_boost', 'XP Boost'); break;
+            const tUser = s.rankings[tRank - 1];
+            if (!tUser) break;
+
+            const safeBuffer = (bufferXP && bufferXP >= 10) ? bufferXP : 60;
+            const need = (tUser.score - s.score) + safeBuffer;
+
+            if (need > 0) {
+                await this.runXP(need, delayMs, 'league');
+                if(!this.activeTasks.has('league')) break;
+            } else {
+                this.updateStats('league', "Waiting for update...", `# ${tRank}`, "...", "...", "...", 50, "...", "Checking...");
+                await new Promise(r => setTimeout(r, 2000));
+            }
         }
-    });
- 
-    const freezeValueEl = document.getElementById('duorain-freeze-value');
-    const freezeIncBtn = document.getElementById('duorain-freeze-increment');
-    const freezeDecBtn = document.getElementById('duorain-freeze-decrement');
- 
-    if (freezeValueEl && freezeIncBtn && freezeDecBtn) {
-        freezeIncBtn.addEventListener('click', () => {
-            let currentValue = parseInt(freezeValueEl.textContent, 10);
-            if (currentValue < 3) freezeValueEl.textContent = currentValue + 1;
-        });
- 
-        freezeDecBtn.addEventListener('click', () => {
-            let currentValue = parseInt(freezeValueEl.textContent, 10);
-            if (currentValue > 0) freezeValueEl.textContent = currentValue - 1;
-        });
+
+        if(this.activeTasks.has('league')) {
+            this.activeTasks.delete('league');
+            this.taskProgress.delete('league');
+            this.taskTimers.delete('league');
+            this.toggleRunBtn('league-btn-run', false);
+            this.updateStats('league', "COMPLETED", "League Goal Reached", 0, 0, "0s", 100, "Done!", "0");
+            this.updateDashRightCard();
+            GlobalNotif("DuoRain Active", "League Goal Reached");
+            document.getElementById('_refresh_profile')?.click();
+        }
     }
 }
- 
-injectNetworkInterceptor();
-initializeAutoClicker();
- 
-if (document.readyState === 'loading') {
-    window.addEventListener('DOMContentLoaded', main);
-} else {
-    main();
+
+class DuoRain {
+    constructor() {
+        this.state = { mini: false, activeId: 'dash', shopItems: [], questFilter: 'MONTHLY' };
+        this.drag = { active: false, x: 0, y: 0 };
+        this.orbDrag = { active: false, x: 0, y: 0, elX: 0, elY: 0, hasMoved: false };
+        this.delays = this.loadDelays();
+        this.leagueBuffer = this.loadLeagueBuffer();
+        this.fx = new functions();
+        this.dashQuestIndex = 0;
+        this.miscState = { type: 'fake_max' };
+        this.notifPos = localStorage.getItem('dr_notif_pos') || config.defaults.notifPos;
+    }
+
+    loadDelays() {
+        const s = localStorage.getItem('dr_delays');
+        return s ? JSON.parse(s) : config.defaults.delays;
+    }
+
+    loadLeagueBuffer() {
+        const s = localStorage.getItem('dr_league_buffer');
+        return s ? parseInt(s) : config.defaults.leagueBuffer;
+    }
+
+    saveDelays() {
+        localStorage.setItem('dr_delays', JSON.stringify(this.delays));
+    }
+
+    saveLeagueBuffer() {
+        localStorage.setItem('dr_league_buffer', this.leagueBuffer);
+    }
+
+    init() {
+        if (!document.querySelector('link[href*="Fugaz+One"]')) {
+            const link = document.createElement('link');
+            link.href = 'https://fonts.googleapis.com/css2?family=Fugaz+One&display=swap';
+            link.rel = 'stylesheet';
+            document.head.appendChild(link);
+        }
+
+        GM_addStyle(CSS);
+
+        const old = document.getElementById(config.id.app);
+        if (old) old.remove();
+        document.body.insertAdjacentHTML('beforeend', HTML);
+        this.cache();
+        this.bind();
+        this.manageLogo();
+        this.el.orb.style.transform = 'scale(0)';
+        this.el.delayInput.value = this.delays[this.el.delayWrapper.getAttribute('data-value')];
+        this.el.leagueBufferInput.value = this.leagueBuffer;
+
+        this.updateMiscUI();
+        this.updateNotifPosUI();
+
+        GlobalNotif = (title, msg) => this.showNotif(title, msg);
+        GlobalPopup = (msg) => this.showAlert(msg);
+        GlobalConfirm = (title, msg) => this.showConfirm(title, msg);
+
+        setTimeout(() => this.moveLine(document.querySelector('.nav-btn.active')), 200);
+        this.loadDashData();
+        this.loadQuests(true);
+        this.updateSaveCardVisibility();
+
+        this.monitorTheme();
+    }
+
+    async saveAccount(token, dec) {
+        const accounts = GM_getValue('dr_accounts', []);
+        const exists = accounts.find(a => a.id === dec.sub);
+        if(exists) return;
+
+        const h = this.fx.formatHeads(token);
+        const u = await this.fx.getUser(dec.sub, h);
+        let pic = assets.logo;
+        if(u && u.picture) pic = u.picture + "/large";
+
+        accounts.push({
+            id: dec.sub,
+            username: u ? u.username : "User",
+            pic: pic,
+            token: token
+        });
+        GM_setValue('dr_accounts', accounts);
+        this.showNotif("Accounts", "Account saved successfully");
+        this.loadDashData();
+    }
+
+    renderAccountsCard(currentUser, isSaved, currentSub) {
+        const card = document.getElementById('acc-current-card');
+        if(!card) return;
+
+        let pic = assets.logo;
+        if(currentUser.picture) {
+            pic = currentUser.picture.replace(/\/(medium|large|small)$/, '/xlarge');
+            if(!pic.endsWith('/xlarge') && pic.includes('duolingo.com/ssr-avatars')) pic += '/xlarge';
+        }
+
+        let hoverHtml = `<div class="acc-status-overlay"><span class="acc-status-text">Currently Logged-in</span></div>`;
+
+        card.innerHTML = `
+            <img src="${pic}" class="acc-avatar">
+            <div class="acc-info">
+                <span class="acc-name">${currentUser.username}</span>
+                <span class="acc-desc">Logged In</span>
+            </div>
+            ${hoverHtml}
+        `;
+    }
+
+    switchAccount(id) {
+        const accounts = GM_getValue('dr_accounts', []);
+        const target = accounts.find(a => a.id == id);
+        if(!target) return;
+        document.cookie = `jwt_token=${target.token}; domain=.duolingo.com; path=/; max-age=31536000`;
+        window.location.reload();
+    }
+
+    async manageLogo() {
+        const url = assets.logo;
+        const kData = 'dr_logo_data';
+        const kSize = 'dr_logo_size';
+        const setImg = (src) => {
+            const list = [
+                this.el.orb.querySelector('img'),
+                this.el.win.querySelector('.logo-img'),
+                document.querySelector('#dr-modal img'),
+                document.querySelector('.dr-notif-icon img')
+            ];
+            assets.logo = src;
+            list.forEach(el => { if(el) el.src = src; });
+            const modalImg = document.querySelector('.header-icon-box img');
+            if(modalImg) modalImg.src = src;
+        };
+
+        try {
+            const cachedData = sessionStorage.getItem(kData);
+            const cachedSize = sessionStorage.getItem(kSize);
+
+            const head = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
+            const netSize = head.headers.get('content-length');
+
+            if (cachedData && cachedSize === netSize) {
+                setImg(cachedData);
+                return;
+            }
+
+            const resp = await fetch(url);
+            const blob = await resp.blob();
+            const reader = new FileReader();
+            reader.onload = () => {
+                const b64 = reader.result;
+                try {
+                    sessionStorage.setItem(kData, b64);
+                    sessionStorage.setItem(kSize, netSize);
+                } catch(e) {}
+                setImg(b64);
+            };
+            reader.readAsDataURL(blob);
+
+        } catch (e) {
+            const c = sessionStorage.getItem(kData);
+            if(c) setImg(c);
+        }
+    }
+
+    updateMiscUI() {
+        const type = this.miscState.type;
+        const btn = document.getElementById('misc-btn-get');
+        const sw = document.getElementById('misc-fake-switch');
+        const wrap = document.getElementById('misc-control-wrapper');
+
+        if(type === 'legit_trial') {
+            sw.style.display = 'none';
+            btn.style.display = 'block';
+        } else {
+            btn.style.display = 'none';
+            sw.style.display = 'block';
+
+            const key = 'dr_fake_max';
+            const isActive = localStorage.getItem(key) === 'true';
+            sw.querySelector('input').checked = isActive;
+        }
+    }
+
+    updateNotifPosUI() {
+        const wrap = document.getElementById('notif-pos-wrapper');
+        if(!wrap) return;
+        wrap.setAttribute('data-value', this.notifPos);
+        const map = { 'bl': "Bottom Left", 'br': "Bottom Right", 'c': "Center" };
+        wrap.querySelector('.c-selected-text').innerText = map[this.notifPos];
+        wrap.querySelectorAll('.c-option').forEach(o => {
+            if(o.getAttribute('data-value') === this.notifPos) o.classList.add('selected');
+            else o.classList.remove('selected');
+        });
+        document.getElementById('dr-notif-area').className = `dr-notif-container pos-${this.notifPos}`;
+    }
+
+    monitorTheme() {
+        const update = () => {
+            let isDark = false;
+            try {
+                const bgColor = window.getComputedStyle(document.body).backgroundColor;
+                const rgb = bgColor.match(/\d+/g);
+                if (rgb) {
+                    const brightness = (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
+                    isDark = brightness < 128;
+                }
+            } catch(e) {}
+
+            if (isDark) {
+                this.el.root.classList.add('dr-dark');
+                this.el.root.classList.remove('dr-light');
+            } else {
+                this.el.root.classList.add('dr-light');
+                this.el.root.classList.remove('dr-dark');
+            }
+        };
+
+        update();
+        setInterval(update, 1000);
+    }
+
+    cache() {
+        const $ = (s) => document.getElementById(s);
+        this.el = {
+            root: $(config.id.app), win: $(config.id.win), orb: $(config.id.orb), magic: document.querySelector('.magic-pill'),
+            title: $('dr-title'), subtitle: $('dr-subtitle'), headerIcon: $('dr-header-icon'), close: $('dr-close'),
+            btns: document.querySelectorAll('.nav-btn'), pages: document.querySelectorAll('.page'), drags: document.querySelectorAll('.drag'),
+            xpBtn: $('xp-btn-run'), xpInput: $('xp-input'), gemBtn: $('gem-btn-run'), gemInput: $('gem-input'),
+            streakBtn: $('streak-btn-run'), streakInput: $('streak-input'), leagueBtn: $('league-btn-run'),
+            leagueWrapper: $('league-select-wrapper'), leagueOptions: $('league-options'), leagueRankText: $('league-current-rank'), leagueXpText: $('league-current-xp'),
+            delayWrapper: $('set-delay-wrapper'), delayInput: $('set-delay-input'), delaySetBtn: $('set-delay-btn'),
+            refreshProfile: $('_refresh_profile'), privacyToggle: $('_privacy_toggle'), privacyLabel: $('_privacy_label'),
+            shopSearch: $('shop-search'), shopContainer: $('shop-container'), shopReload: $('shop-reload'), shopEmpty: $('shop-empty'),
+            questClaim: $('quest-btn-claim'), questContainer: $('quest-container'), questFilters: document.querySelectorAll('.quest-filter-btn'), questReload: $('quest-reload'),
+            dqHead: $('dq-head'), dqImg: $('dq-img'), dqText: $('dq-text'), dqBtn: $('dq-btn'),
+            dqLeft: $('dq-left'), dqRight: $('dq-right'), dqRank: $('dq-rank'), dqLeagueXp: $('dq-league-xp'),
+            dashCardContent: $('dash-card-content'),
+            leagueBufferInput: $('set-league-buffer-input'), leagueBufferBtn: $('set-league-buffer-btn'),
+            notifPosWrapper: $('notif-pos-wrapper'), notifPosBtn: $('notif-pos-btn'),
+            accOpenMenu: $('acc-open-menu'),
+            accSaveCard: $('acc-save-card'), accSaveBtn: $('acc-save-btn')
+        };
+    }
+
+    bind() {
+        this.el.btns.forEach(b => b.addEventListener('click', () => this.switchTab(b)));
+        this.el.close.addEventListener('click', () => this.toggle(true));
+
+        this.el.orb.addEventListener('mousedown', (e) => {
+            this.orbDrag = {
+                active: true,
+                x: e.clientX,
+                y: e.clientY,
+                elX: this.el.orb.getBoundingClientRect().left,
+                elY: this.el.orb.getBoundingClientRect().top,
+                hasMoved: false
+            };
+            this.el.orb.style.transition = 'none';
+            e.preventDefault();
+        });
+
+        this.el.drags.forEach(d => {
+            d.addEventListener('mousedown', (e) => {
+                this.drag.active = true;
+                this.drag.x = e.clientX - this.el.win.offsetLeft;
+                this.drag.y = e.clientY - this.el.win.offsetTop;
+                e.preventDefault();
+            });
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (this.drag.active) {
+                e.preventDefault();
+                let x = e.clientX - this.drag.x;
+                let y = e.clientY - this.drag.y;
+                x = Math.max(0, Math.min(x, window.innerWidth - this.el.win.offsetWidth));
+                y = Math.max(0, Math.min(y, window.innerHeight - this.el.win.offsetHeight));
+                this.el.win.style.left = `${x}px`;
+                this.el.win.style.top = `${y}px`;
+            }
+
+            if (this.orbDrag.active) {
+                e.preventDefault();
+                const dx = e.clientX - this.orbDrag.x;
+                const dy = e.clientY - this.orbDrag.y;
+                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) this.orbDrag.hasMoved = true;
+
+                let nX = this.orbDrag.elX + dx;
+                let nY = this.orbDrag.elY + dy;
+                const maxW = window.innerWidth - 68;
+                const maxH = window.innerHeight - 68;
+                nX = Math.max(0, Math.min(nX, maxW));
+                nY = Math.max(0, Math.min(nY, maxH));
+
+                this.el.orb.style.left = nX + 'px';
+                this.el.orb.style.top = nY + 'px';
+                this.el.orb.style.bottom = 'auto';
+                this.el.orb.style.right = 'auto';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            this.drag.active = false;
+            if (this.orbDrag.active) {
+                this.orbDrag.active = false;
+                this.el.orb.style.transition = 'transform .3s cubic-bezier(.34,1.56,.64,1)';
+                if (!this.orbDrag.hasMoved) {
+                    this.toggle(false);
+                }
+            }
+        });
+
+        this.el.xpBtn.addEventListener('click', () => {
+            if(this.fx.activeTasks.has('xp')) { this.fx.stopTask('xp'); return; }
+            const v = this.el.xpInput.value;
+            parseInt(v) >= 30 ? this.fx.runXP(v, this.delays.xp, 'xp') : this.showAlert("Min XP: 30");
+        });
+        this.el.gemBtn.addEventListener('click', () => {
+            if(this.fx.activeTasks.has('gem')) { this.fx.stopTask('gem'); return; }
+            const v = this.el.gemInput.value;
+            parseInt(v) >= 1 ? this.fx.runGem(parseInt(v), this.delays.gem) : this.showAlert("Min loops: 1");
+        });
+        this.el.streakBtn.addEventListener('click', () => {
+            if(this.fx.activeTasks.has('streak')) { this.fx.stopTask('streak'); return; }
+            const v = this.el.streakInput.value;
+            parseInt(v) >= 1 ? this.fx.runStreak(parseInt(v), this.delays.streak) : this.showAlert("Min days: 1");
+        });
+        this.el.leagueBtn.addEventListener('click', () => {
+            if(this.fx.activeTasks.has('league')) { this.fx.stopTask('league'); return; }
+            const v = this.el.leagueWrapper.getAttribute('data-value');
+            if (v) this.fx.runLeague(parseInt(v), this.delays.league, this.leagueBuffer);
+        });
+        this.el.delaySetBtn.addEventListener('click', () => {
+            const t = this.el.delayWrapper.getAttribute('data-value');
+            const v = parseInt(this.el.delayInput.value);
+            if (!isNaN(v) && v >= 0) {
+                this.delays[t] = v;
+                this.saveDelays();
+                const og = this.el.delaySetBtn.innerText;
+                this.el.delaySetBtn.innerText = "SAVED";
+                setTimeout(() => { this.el.delaySetBtn.innerText = og; }, 1000);
+            } else this.showAlert("Invalid delay");
+        });
+        this.el.leagueBufferBtn.addEventListener('click', () => {
+            const v = parseInt(this.el.leagueBufferInput.value);
+            if(!isNaN(v) && v >= 10) {
+                this.leagueBuffer = v;
+                this.saveLeagueBuffer();
+                const og = this.el.leagueBufferBtn.innerText;
+                this.el.leagueBufferBtn.innerText = "SAVED";
+                setTimeout(() => { this.el.leagueBufferBtn.innerText = og; }, 1000);
+            } else this.showAlert("Buffer must be at least 10 XP");
+        });
+
+        this.el.notifPosBtn.addEventListener('click', () => {
+            const v = this.el.notifPosWrapper.getAttribute('data-value');
+            this.notifPos = v;
+            localStorage.setItem('dr_notif_pos', v);
+            this.updateNotifPosUI();
+            this.showNotif("Settings", "Notification Position Saved");
+            const og = this.el.notifPosBtn.innerText;
+            this.el.notifPosBtn.innerText = "SAVED";
+            setTimeout(() => { this.el.notifPosBtn.innerText = og; }, 1000);
+        });
+
+        this.el.accOpenMenu.addEventListener('click', () => this.openAccountManager());
+
+        if(this.el.accSaveBtn) {
+            this.el.accSaveBtn.addEventListener('click', async () => {
+                const t = this.fx.getJWT();
+                if(t) {
+                    this.el.accSaveBtn.innerText = "SAVING...";
+                    const dec = this.fx.decJWT(t);
+                    await this.saveAccount(t, dec);
+                    this.el.accSaveBtn.innerText = "SAVED";
+                    this.updateSaveCardVisibility();
+                }
+            });
+        }
+
+        const miscSwitch = document.getElementById('misc-fake-switch');
+        if(miscSwitch) {
+            const miscInput = miscSwitch.querySelector('input');
+            miscInput.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const isEnabled = localStorage.getItem('dr_fake_max') === 'true';
+                const action = isEnabled ? 'disable' : 'enable';
+                const confirm = await GlobalConfirm(`${action.charAt(0).toUpperCase() + action.slice(1)} Max`, `Are you sure you want to ${action} Free Max? This requires a page reload.`);
+                if (confirm) {
+                    localStorage.setItem('dr_fake_max', (!isEnabled).toString());
+                    localStorage.setItem('dr_fake_super', 'false');
+                    window.location.reload();
+                }
+            });
+        }
+
+        document.getElementById('misc-btn-get').addEventListener('click', async () => {
+            const btn = document.getElementById('misc-btn-get');
+            btn.innerText = "Processing...";
+            const t = this.fx.getJWT();
+            if(t) {
+                const sub = this.fx.decJWT(t).sub;
+                const h = this.fx.formatHeads(t);
+                const success = await this.fx.buyLegitSuper(h, sub);
+                if(success) {
+                    btn.innerText = "GOT";
+                    btn.classList.add('btn-got');
+                    setTimeout(() => {
+                        btn.innerText = "GET";
+                        btn.classList.remove('btn-got');
+                    }, 3000);
+                    this.showAlert("Super Trial Activated! (Refresh might be needed)");
+                } else {
+                    btn.innerText = "FAILED";
+                    setTimeout(() => { btn.innerText = "GET"; }, 2000);
+                }
+            } else {
+                btn.innerText = "LOGIN REQ";
+            }
+        });
+
+        this.el.refreshProfile.addEventListener('click', () => { this.loadDashData(); });
+        this.el.privacyToggle.addEventListener('change', async (e) => {
+            const isP = e.target.checked;
+            this.el.privacyLabel.innerText = isP ? "PRIVATE" : "PUBLIC";
+            const t = this.fx.getJWT();
+            if (t) await this.fx.setPstatus(this.fx.decJWT(t).sub, this.fx.formatHeads(t), isP);
+        });
+
+        this.el.shopSearch.addEventListener('input', (e) => {
+            const t = e.target.value.toLowerCase().trim();
+            let total = 0;
+            document.querySelectorAll('.shop-category-wrapper').forEach(w => {
+                let catCount = 0;
+                w.querySelectorAll('.shop-item').forEach(i => {
+                    const m = i.querySelector('.item-name').innerText.toLowerCase().trim().startsWith(t);
+                    i.style.display = m ? 'flex' : 'none';
+                    if (m) catCount++;
+                });
+                w.style.display = catCount > 0 ? 'block' : 'none';
+                total += catCount;
+            });
+            this.el.shopEmpty.style.display = total === 0 ? 'block' : 'none';
+        });
+
+        this.el.shopReload.addEventListener('click', () => {
+            localStorage.removeItem('dr_shop_data');
+            this.el.shopContainer.innerHTML = '<p style="text-align:center;color:var(--wolf);padding:20px;">Reloading items...</p>';
+            this.loadShop();
+        });
+
+        this.el.questReload.addEventListener('click', () => this.loadQuests(false));
+        this.el.questClaim.addEventListener('click', () => this.finishCategory());
+        this.el.questFilters.forEach(b => {
+            b.addEventListener('click', (e) => {
+                this.el.questFilters.forEach(x => x.classList.remove('active'));
+                e.target.classList.add('active');
+                this.state.questFilter = e.target.dataset.filter;
+                this.renderQuests();
+            });
+        });
+
+        this.el.dqLeft.addEventListener('click', () => {
+            this.dashQuestIndex = (this.dashQuestIndex - 1 + 3) % 3;
+            this.updateDashQuestCard();
+        });
+        this.el.dqRight.addEventListener('click', () => {
+            this.dashQuestIndex = (this.dashQuestIndex + 1) % 3;
+            this.updateDashQuestCard();
+        });
+        this.el.dqBtn.addEventListener('click', async () => {
+            const types = ['DAILY', 'MONTHLY', 'FRIENDS'];
+            const target = types[this.dashQuestIndex];
+            const t = this.fx.getJWT();
+            const sub = this.fx.decJWT(t).sub;
+            const h = this.fx.getGoalHeaders(t);
+
+            this.el.dqBtn.innerText = "Processing...";
+
+            const uniqueMetrics = new Set();
+            this.questState.schema.goals.forEach(g => {
+                if (g.category && g.category.includes(target)) {
+                    if (g.metric) uniqueMetrics.add(g.metric);
+                }
+            });
+
+            if (uniqueMetrics.size > 0) {
+                await this.fx.bruteForceGoals(sub, h, Array.from(uniqueMetrics));
+                this.loadQuests(true);
+            } else {
+                this.el.dqBtn.innerText = "Error";
+                setTimeout(() => this.updateDashQuestCard(), 1000);
+            }
+        });
+
+        document.getElementById('dr-modal-btn').addEventListener('click', () => {
+            document.getElementById('dr-modal-overlay').classList.remove('active');
+            document.getElementById('dr-modal-overlay').style.pointerEvents = "none";
+            this.el.win.style.filter = "none";
+        });
+
+        this.initDropD();
+    }
+
+    updateSaveCardVisibility() {
+        const t = this.fx.getJWT();
+        if(!t) return;
+        const sub = this.fx.decJWT(t).sub;
+        const accounts = GM_getValue('dr_accounts', []);
+        const isSaved = accounts.some(a => a.id == sub);
+
+        if(this.el.accSaveCard) {
+            this.el.accSaveCard.style.display = isSaved ? 'none' : 'block';
+        }
+    }
+
+    openAccountManager() {
+        document.getElementById('dr-modal-title').innerText = "Account Management";
+        const content = document.getElementById('dr-modal-content');
+        const acts = document.getElementById('dr-modal-actions');
+
+        const renderList = () => {
+            const accounts = GM_getValue('dr_accounts', []);
+            const currentSub = (this.fx.decJWT(this.fx.getJWT()) || {}).sub;
+
+            if(accounts.length === 0) return `<p style="text-align:center;color:var(--wolf);">No saved accounts.</p>`;
+
+            return accounts.map(acc => {
+                const isActive = acc.id == currentSub;
+                const actionBtn = isActive
+                    ? `<span style="color:var(--rain-hex);font-weight:800;font-size:11px;align-self:center;margin-right:5px;">ACTIVE</span>`
+                    : `<button class="acc-login-btn" data-id="${acc.id}">LOGIN</button>`;
+
+                return `
+                <div class="acc-item-row">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <img src="${acc.pic}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">
+                        <span style="font-weight:700;color:var(--eel);font-size:14px;">${acc.username}</span>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        ${actionBtn}
+                        <button class="acc-del-btn" data-id="${acc.id}">${assets.icons.close}</button>
+                    </div>
+                </div>`;
+            }).join('');
+        };
+
+        const updateContent = () => {
+            content.innerHTML = `
+                <div class="acc-grid" id="acc-modal-list">
+                    ${renderList()}
+                </div>
+            `;
+
+            const list = document.getElementById('acc-modal-list');
+            list.querySelectorAll('.acc-login-btn').forEach(b => { b.onclick = () => this.switchAccount(b.dataset.id); });
+            list.querySelectorAll('.acc-del-btn').forEach(b => {
+                b.onclick = async () => {
+                    const c = await GlobalConfirm("Remove Account", "Are you sure you want to remove this account?");
+                    if(c) {
+                        const accounts = GM_getValue('dr_accounts', []);
+                        const n = accounts.filter(a => a.id != b.dataset.id);
+                        GM_setValue('dr_accounts', n);
+                        updateContent();
+                        this.loadDashData();
+                        this.updateSaveCardVisibility();
+                    }
+                }
+            });
+        };
+
+        updateContent();
+
+        acts.innerHTML = `<button class="btn" id="dr-modal-close" style="width:100%">CLOSE</button>`;
+
+        const ov = document.getElementById('dr-modal-overlay');
+        ov.style.pointerEvents = "auto";
+        ov.classList.add('active');
+        this.el.win.style.filter = "blur(5px)";
+
+        document.getElementById('dr-modal-close').onclick = () => {
+            ov.classList.remove('active');
+            ov.style.pointerEvents = "none";
+            this.el.win.style.filter = "none";
+        };
+    }
+
+    initDropD() {
+        document.querySelectorAll('.c-select-trigger').forEach(t => {
+            t.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const p = t.parentElement;
+                document.querySelectorAll('.c-select').forEach(s => { if (s !== p) s.classList.remove('open'); });
+                p.classList.toggle('open');
+            });
+        });
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.c-option')) {
+                e.stopPropagation();
+                const o = e.target.closest('.c-option');
+                const w = o.closest('.c-select');
+                const v = o.getAttribute('data-value');
+                w.querySelector('.c-selected-text').innerText = o.innerText;
+                w.setAttribute('data-value', v);
+                w.querySelectorAll('.c-option').forEach(op => op.classList.remove('selected'));
+                o.classList.add('selected');
+                w.classList.remove('open');
+                if (w.id === 'set-delay-wrapper') this.el.delayInput.value = this.delays[v];
+                if (w.id === 'misc-super-select-wrapper') {
+                    this.miscState.type = v;
+                    const descEl = document.getElementById('misc-desc');
+                    if(v === 'fake_max') descEl.innerText = "Activate Free Max in your account indefinitely and at no cost";
+                    else descEl.innerText = "Activate Free 3-Days Super trial";
+                    this.updateMiscUI();
+                }
+            } else {
+                document.querySelectorAll('.c-select').forEach(s => s.classList.remove('open'));
+            }
+        });
+    }
+
+    showNotif(title, msg) {
+        const area = document.getElementById('dr-notif-area');
+        const el = document.createElement('div');
+        el.className = 'dr-notification';
+        el.innerHTML = `
+            <div class="dr-notif-close">×</div>
+            <div class="dr-notif-icon"><img src="${assets.logo}"></div>
+            <div class="dr-notif-content">
+                <span class="dr-notif-title">${title}</span>
+                <span class="dr-notif-desc">${msg}</span>
+            </div>
+        `;
+        const closeBtn = el.querySelector('.dr-notif-close');
+        const remove = () => {
+            if(el.classList.contains('hiding')) return;
+            el.classList.remove('show');
+            el.classList.add('hiding');
+            setTimeout(() => el.remove(), 400);
+        };
+        closeBtn.onclick = remove;
+        area.prepend(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+        setTimeout(remove, 5000);
+    }
+
+    showAlert(msg) {
+        document.getElementById('dr-modal-title').innerText = "Alert";
+        document.getElementById('dr-modal-content').innerHTML = `<p id="dr-modal-msg" style="color:var(--wolf);font-size:16px;line-height:1.5;margin:0 0 25px">${msg}</p>`;
+        document.getElementById('dr-modal-actions').innerHTML = `<button class="btn" id="dr-modal-btn" style="width:100%">OKAY</button>`;
+        const ov = document.getElementById('dr-modal-overlay');
+        ov.style.pointerEvents = "auto";
+        ov.classList.add('active');
+        this.el.win.style.filter = "blur(5px)";
+        document.getElementById('dr-modal-btn').onclick = () => {
+            ov.classList.remove('active');
+            ov.style.pointerEvents = "none";
+            this.el.win.style.filter = "none";
+        };
+    }
+
+    async showConfirm(title, msg) {
+        return new Promise((resolve) => {
+            document.getElementById('dr-modal-title').innerText = title;
+            document.getElementById('dr-modal-content').innerHTML = `<p id="dr-modal-msg" style="color:var(--wolf);font-size:16px;line-height:1.5;margin:0 0 25px">${msg}</p>`;
+            const acts = document.getElementById('dr-modal-actions');
+            acts.innerHTML = `
+                <button class="dr-modal-btn-sec" id="dr-confirm-no">CANCEL</button>
+                <button class="btn" id="dr-confirm-yes" style="flex:1">CONFIRM</button>
+            `;
+            const ov = document.getElementById('dr-modal-overlay');
+            ov.style.pointerEvents = "auto";
+            ov.classList.add('active');
+            this.el.win.style.filter = "blur(5px)";
+
+            const close = (res) => {
+                ov.classList.remove('active');
+                ov.style.pointerEvents = "none";
+                this.el.win.style.filter = "none";
+                resolve(res);
+            };
+
+            document.getElementById('dr-confirm-yes').onclick = () => close(true);
+            document.getElementById('dr-confirm-no').onclick = () => close(false);
+        });
+    }
+
+    async loadDashData() {
+        const t = this.fx.getJWT();
+        if (t) {
+            const sub = this.fx.decJWT(t).sub;
+            const h = this.fx.formatHeads(t);
+            const u = await this.fx.getUser(sub, h);
+            const p = await this.fx.getPstatus(sub, h);
+            if (u) {
+                this.fx.updateDash(u, p);
+
+                const accounts = GM_getValue('dr_accounts', []);
+                const isSaved = accounts.some(a => a.id === sub);
+
+                this.renderAccountsCard(u, isSaved, sub);
+            }
+
+            const l = await this.fx.getLstatus(sub, h);
+            const elRank = document.getElementById('dq-rank');
+            const elXP = document.getElementById('dq-league-xp');
+
+            if (l) {
+                this.el.leagueRankText.innerText = `# ${l.rank}`;
+                this.el.leagueXpText.innerText = `${l.score.toLocaleString()} XP`;
+                if(elRank && this.fx.activeTasks.size === 0) elRank.innerText = `# ${l.rank}`;
+                if(elXP && this.fx.activeTasks.size === 0) elXP.innerText = `${l.score.toLocaleString()} XP`;
+                this.popLeagueSelect(l.rank);
+            } else {
+                if(elRank && this.fx.activeTasks.size === 0) elRank.innerText = "--";
+                if(elXP && this.fx.activeTasks.size === 0) elXP.innerText = "No League Data";
+            }
+            this.updateSaveCardVisibility();
+        }
+    }
+
+    popLeagueSelect(rank) {
+        const c = this.el.leagueOptions;
+        c.innerHTML = "";
+        if (rank <= 1) {
+            c.innerHTML = `<div class="c-option" style="cursor:default;opacity:0.5;">Max Rank Reached</div>`;
+            this.el.leagueWrapper.querySelector('.c-selected-text').innerText = "Max";
+            this.el.leagueWrapper.setAttribute('data-value', "");
+            return;
+        }
+        for (let i = 1; i < rank; i++) {
+            const d = document.createElement('div');
+            d.className = 'c-option';
+            if (i === 1) d.classList.add('selected');
+            d.setAttribute('data-value', i);
+            d.innerText = `# ${i}`;
+            c.appendChild(d);
+        }
+        this.el.leagueWrapper.querySelector('.c-selected-text').innerText = "# 1";
+        this.el.leagueWrapper.setAttribute('data-value', "1");
+    }
+
+    formatItem(id) {
+        return id.split('_').map(w => {
+            if (w === 'xp') return 'XP';
+            if (!isNaN(w)) return w;
+            return w.charAt(0).toUpperCase() + w.slice(1);
+        }).join(' ');
+    }
+
+    defineShop(items) {
+        const valid = items.filter(i => i.currencyType === "XGM" && !i.id.includes('gift'));
+        const p = valid.map(i => {
+            let name = i.name || this.formatItem(i.id);
+            let cat = "Misc";
+            let icon = assets.shopIcons.misc;
+            if (i.id.includes('streak_freeze')) {
+                cat = "Streak Freezes";
+                icon = assets.shopIcons.streak;
+            } else if (i.id.includes('xp_boost')) {
+                cat = "XP Boosts";
+                icon = assets.shopIcons.xp;
+                if (i.id.match(/\d+$/)) name += " Mins";
+            } else if (i.id.includes('health') || i.id.includes('heart')) {
+                cat = "Hearts";
+                icon = assets.shopIcons.heart;
+                if (i.id.includes('partial')) {
+                    const n = i.id.match(/\d$/);
+                    if (n) name = `Health Refill Partial (${n[0]} Heart)`;
+                }
+            } else if (i.id.includes('gem')) {
+                cat = "Gems";
+                icon = assets.shopIcons.gem;
+            } else if (i.type === "outfit") {
+                cat = "Outfits";
+                icon = assets.shopIcons.outfit;
+            } else if (i.id.includes('free_taste')) {
+                cat = "Free Taste";
+                icon = assets.shopIcons.free;
+            }
+            return { ...i, displayName: name, category: cat, icon };
+        });
+        const ord = ["Streak Freezes", "XP Boosts", "Hearts", "Gems", "Outfits", "Free Taste", "Misc"];
+        return p.sort((a, b) => {
+            const ca = ord.indexOf(a.category);
+            const cb = ord.indexOf(b.category);
+            return ca !== cb ? ca - cb : a.displayName.localeCompare(b.displayName);
+        });
+    }
+
+    renderShop(items) {
+        this.el.shopContainer.innerHTML = "";
+        const grp = {};
+        items.forEach(i => {
+            if (!grp[i.category]) grp[i.category] = [];
+            grp[i.category].push(i);
+        });
+        for (const c in grp) {
+            const w = document.createElement('div');
+            w.className = 'shop-category-wrapper';
+            const h = document.createElement('div');
+            h.className = 'category-header';
+            h.innerText = c;
+            w.appendChild(h);
+            const g = document.createElement('div');
+            g.className = 'shop-grid';
+            grp[c].forEach(i => {
+                const card = document.createElement('div');
+                card.className = 'shop-item';
+                card.innerHTML = `<img src="${i.icon}" class="item-icon"><div class="item-name">${i.displayName}</div><button class="item-btn" data-id="${i.id}">GET</button>`;
+                g.appendChild(card);
+            });
+            w.appendChild(g);
+            this.el.shopContainer.appendChild(w);
+        }
+        this.el.shopContainer.querySelectorAll('.item-btn').forEach(b => {
+            b.addEventListener('click', async () => {
+                const id = b.getAttribute('data-id');
+                const item = items.find(i => i.id === id);
+                if (!item) return;
+                b.classList.add('buying');
+                b.innerText = "0%";
+                const t = this.fx.getJWT();
+                if (t) {
+                    const h = this.fx.formatHeads(t);
+                    const sub = this.fx.decJWT(t).sub;
+                    setTimeout(() => { b.innerText = "50%"; }, 300);
+                    const ok = await this.fx.buyShop(h, sub, item);
+                    b.innerText = "100%";
+                    setTimeout(() => {
+                        if (ok) {
+                            b.innerText = "GOT";
+                            b.classList.add('btn-got');
+                            this.showNotif("Shop", `Acquired ${item.displayName}`);
+                            setTimeout(() => {
+                                b.innerText = "GET";
+                                b.classList.remove('btn-got');
+                                b.classList.remove('buying');
+                            }, 3000);
+                        } else {
+                            b.innerText = "FAILED";
+                            b.classList.remove('buying');
+                            setTimeout(() => { b.innerText = "GET"; }, 2000);
+                            this.showAlert("Failed to buy item.");
+                        }
+                    }, 300);
+                }
+            });
+        });
+    }
+
+    async loadShop() {
+        const cached = localStorage.getItem('dr_shop_data');
+        if (cached) {
+            try {
+                const items = JSON.parse(cached);
+                if (items && items.length > 0) {
+                    this.renderShop(this.defineShop(items));
+                    return;
+                }
+            } catch(e) { localStorage.removeItem('dr_shop_data'); }
+        }
+
+        const t = this.fx.getJWT();
+        if (t) {
+            const h = this.fx.formatHeads(t);
+            const s = this.fx.decJWT(t).sub;
+            const items = await this.fx.getShop(h, s);
+            if(items && items.length > 0) localStorage.setItem('dr_shop_data', JSON.stringify(items));
+            this.renderShop(this.defineShop(items));
+        }
+    }
+
+    async loadQuests(silent = false) {
+        const t = this.fx.getJWT();
+        if (!t) return;
+        const sub = this.fx.decJWT(t).sub;
+        const headers = this.fx.getGoalHeaders(t);
+
+        if (!silent) {
+            this.el.questContainer.innerHTML = `<p style="text-align:center;color:var(--wolf);padding:20px;">Refreshing quest data...</p>`;
+        }
+
+        const user = await this.fx.getUser(sub, this.fx.formatHeads(t));
+        this.questState = { creationDate: user.trackingProperties?.creation_date_new ? new Date(user.trackingProperties.creation_date_new) : null };
+
+        const schema = await this.fx.getGoals(headers);
+        const progress = await this.fx.getUserProgress(sub, headers);
+
+        if (schema && progress) {
+            this.questState.schema = schema;
+            this.questState.progress = progress.goals?.progress || {};
+            this.questState.earned = new Set(progress.badges?.earned || []);
+            this.renderQuests();
+            this.updateDashQuestCard();
+        } else {
+            if (!silent) this.el.questContainer.innerHTML = `<p style="text-align:center;color:red;padding:20px;">Error loading quests.</p>`;
+        }
+    }
+
+    isQuestOlder(goalId) {
+        if (!this.questState.creationDate) return false;
+        const m = goalId.match(/^(\d{4})_(\d{2})_monthly/);
+        if (m) {
+            const y = parseInt(m[1]), mo = parseInt(m[2]) - 1;
+            const cY = this.questState.creationDate.getFullYear(), cM = this.questState.creationDate.getMonth();
+            if (y < cY || (y === cY && mo < cM)) return true;
+        }
+        return false;
+    }
+
+    updateMainButton() {
+        const filter = this.state.questFilter;
+        let label = "FINISH ALL";
+        if (filter === 'MONTHLY') label = "FINISH MONTHLY";
+        else if (filter === 'DAILY') label = "FINISH DAILY";
+        else if (filter === 'FRIENDS') label = "FINISH FRIENDS";
+        else if (filter === 'WEEKLY') label = "FINISH WEEKLY";
+        this.el.questClaim.innerText = label;
+    }
+
+    renderQuests() {
+        if (!this.questState || !this.questState.schema) return;
+        const c = this.el.questContainer;
+        c.innerHTML = "";
+        this.updateMainButton();
+
+        const map = new Map();
+        const monthlyGoals = [], otherGoals = [];
+        const monthlyRegex = /^(\d{4}_\d{2})_monthly/;
+
+        this.questState.schema.goals.forEach(g => {
+            const match = g.goalId.match(monthlyRegex);
+            if (match) {
+                monthlyGoals.push({ key: match[1], goal: g });
+            } else {
+                otherGoals.push(g);
+            }
+        });
+
+        monthlyGoals.forEach(item => {
+            const existing = map.get(item.key);
+            if (!existing) {
+                map.set(item.key, item.goal);
+            } else {
+                const existingIsChallenge = existing.category.includes('CHALLENGE');
+                const newIsChallenge = item.goal.category.includes('CHALLENGE');
+                if (!existingIsChallenge && newIsChallenge) {
+                    map.set(item.key, item.goal);
+                }
+            }
+        });
+
+        const allGoals = [...otherGoals, ...map.values()].reverse();
+
+        allGoals.forEach(g => {
+            if (!g.category) return;
+            if (this.state.questFilter !== 'ALL' && !g.category.includes(this.state.questFilter)) return;
+
+            const isEarned = this.questState.earned.has(g.badgeId) || this.questState.earned.has(g.goalId);
+            const isOld = this.isQuestOlder(g.goalId);
+
+            let cur = 0;
+            const raw = this.questState.progress[g.goalId];
+            if (typeof raw === 'number') cur = raw;
+            else if (raw && typeof raw === 'object') cur = raw.progress || 0;
+
+            const tgt = g.threshold || 10;
+            let pct = Math.min(100, (cur / tgt) * 100);
+            if (isEarned) { pct = 100; cur = tgt; }
+
+            let remaining = Math.max(0, tgt - cur);
+
+            const item = document.createElement('div');
+            item.className = `quest-item ${isEarned ? 'completed' : ''} ${isOld ? 'warning' : ''}`;
+
+            let icon = assets.chest;
+            if (g.category.includes("MONTHLY")) {
+                const b = this.questState.schema.badges.find(x => x.badgeId === g.badgeId);
+                if (b && b.icon?.enabled?.lightMode) icon = b.icon.enabled.lightMode.svg || b.icon.enabled.lightMode.url || icon;
+            }
+
+            let actionBtn = '';
+            if (!isEarned && remaining > 0) {
+                 actionBtn = `<button class="q-mini-btn finish" data-m="${g.metric}" data-a="${remaining}" data-id="${g.goalId}">FINISH (+${remaining})</button>`;
+            }
+
+            item.innerHTML = `
+                <img src="${icon}" class="quest-icon">
+                <div class="quest-info">
+                    <div class="quest-title">${g.title?.uiString || g.goalId} ${isOld ? '⚠️' : ''}</div>
+                    <div class="quest-meta">${g.metric} • ${isEarned ? 'COMPLETED' : `${cur} / ${tgt}`}</div>
+                    <div class="quest-bar-bg"><div class="quest-bar-fill" style="width:${pct}%"></div></div>
+                </div>
+                <div class="quest-actions">
+                    ${actionBtn}
+                </div>
+            `;
+
+            item.querySelectorAll('.q-mini-btn').forEach(btn => {
+                btn.onclick = async () => {
+                    if (isOld) {
+                        const confirm = await GlobalConfirm("Risk Warning", "This quest is old. Continuing might be risky. Proceed?");
+                        if(!confirm) return;
+                    }
+                    btn.innerText = "...";
+                    const t = this.fx.getJWT();
+                    const sub = this.fx.decJWT(t).sub;
+                    const h = this.fx.getGoalHeaders(t);
+                    await this.fx.updateGoal(sub, h, btn.dataset.m, parseInt(btn.dataset.a), btn.dataset.id);
+                    btn.innerText = "OK";
+                    this.showNotif("Quest", "Progress injected successfully");
+                    setTimeout(() => this.loadQuests(true), 800);
+                };
+            });
+            c.appendChild(item);
+        });
+    }
+
+    updateDashQuestCard() {
+        if (!this.questState || !this.questState.schema) {
+            this.el.dqText.innerText = "Data missing...";
+            return;
+        }
+
+        const types = ['DAILY', 'MONTHLY', 'FRIENDS'];
+        const labels = ['Daily Quests', 'Monthly Quest', 'Friends Quest'];
+        const currentType = types[this.dashQuestIndex];
+
+        let total = 0;
+        let completed = 0;
+        let icon = assets.chest;
+
+        const currentDate = new Date();
+        const currentYearStr = currentDate.getFullYear().toString();
+        const currentMonthStr = (currentDate.getMonth() + 1).toString().padStart(2, '0');
+        const monthlyRegex = new RegExp(`^${currentYearStr}_${currentMonthStr}_monthly`);
+
+        if (currentType === 'MONTHLY') {
+            this.questState.schema.goals.forEach(g => {
+                if (g.category && g.category.includes('MONTHLY')) {
+                    if (g.goalId.match(monthlyRegex)) {
+                        total++;
+                        const b = this.questState.schema.badges.find(x => x.badgeId === g.badgeId);
+                        if (b && b.icon?.enabled?.lightMode) icon = b.icon.enabled.lightMode.svg || b.icon.enabled.lightMode.url;
+
+                        const isEarned = this.questState.earned.has(g.badgeId) || this.questState.earned.has(g.goalId);
+                        const raw = this.questState.progress[g.goalId];
+                        const cur = (typeof raw === 'number') ? raw : (raw?.progress || 0);
+                        const tgt = g.threshold || 1000;
+
+                        if (isEarned || cur >= tgt) completed++;
+                    }
+                }
+            });
+        } else {
+            this.questState.schema.goals.forEach(g => {
+                if (g.category && g.category.includes(currentType)) {
+                    total++;
+                    const isEarned = this.questState.earned.has(g.badgeId) || this.questState.earned.has(g.goalId);
+                    const raw = this.questState.progress[g.goalId];
+                    const cur = (typeof raw === 'number') ? raw : (raw?.progress || 0);
+                    const tgt = g.threshold || 1;
+                    if (isEarned || cur >= tgt) completed++;
+                }
+            });
+        }
+
+        const isDone = total > 0 && total === completed;
+
+        this.el.dqHead.innerText = labels[this.dashQuestIndex];
+        this.el.dqImg.src = icon;
+
+        if (total === 0) {
+            this.el.dqText.innerText = `No active ${labels[this.dashQuestIndex].toLowerCase()}`;
+            this.el.dqBtn.classList.add('done');
+            this.el.dqBtn.innerText = "NONE";
+        } else if (isDone) {
+            this.el.dqText.innerText = `All ${labels[this.dashQuestIndex].toLowerCase()} have been completed!`;
+            this.el.dqBtn.classList.add('done');
+            this.el.dqBtn.innerText = "COMPLETED";
+        } else {
+            this.el.dqText.innerText = `Complete ${labels[this.dashQuestIndex].toLowerCase()}?`;
+            this.el.dqBtn.classList.remove('done');
+            this.el.dqBtn.innerText = "FINISH";
+        }
+    }
+
+    async finishCategory() {
+        if (!this.questState || !this.questState.schema) return;
+        const activeFilter = this.state.questFilter;
+
+        const confirm = await GlobalConfirm("Mass Completion", `Force complete quests in ${activeFilter} category?`);
+        if (!confirm) return;
+
+        this.el.questClaim.innerText = "PROCESSING...";
+        this.el.questClaim.classList.add('disabled');
+
+        const t = this.fx.getJWT();
+        const sub = this.fx.decJWT(t).sub;
+        const h = this.fx.getGoalHeaders(t);
+
+        const uniqueMetrics = new Set();
+        this.questState.schema.goals.forEach(g => {
+            if (g.category && (activeFilter === 'ALL' || g.category.includes(activeFilter))) {
+                if (g.metric) uniqueMetrics.add(g.metric);
+            }
+        });
+
+        if (uniqueMetrics.size > 0) {
+            await this.fx.bruteForceGoals(sub, h, Array.from(uniqueMetrics));
+            this.showNotif("Mass Quest", "Finished processing quests");
+        } else {
+            this.showAlert("No metrics found for this category.");
+        }
+
+        this.el.questClaim.innerText = "DONE";
+        setTimeout(() => {
+            this.updateMainButton();
+            this.el.questClaim.classList.remove('disabled');
+            this.loadQuests(true);
+        }, 1000);
+    }
+
+    switchTab(b) {
+        const id = b.dataset.id;
+        if (this.state.activeId === id) return;
+        this.state.activeId = id;
+        this.el.title.innerText = b.querySelector('span').innerText;
+        this.el.subtitle.innerText = desc[id] || "";
+        const ic = b.querySelector('svg') || b.querySelector('img');
+        if (ic) {
+            this.el.headerIcon.innerHTML = '';
+            this.el.headerIcon.appendChild(ic.cloneNode(true));
+        }
+        this.el.btns.forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        this.moveLine(b);
+        this.el.pages.forEach(p => p.classList.remove('active'));
+        document.getElementById(`pg-${id}`).classList.add('active');
+        if (id === 'league') {
+            this.loadDashData();
+            document.querySelector('.scroller').classList.add('no-scroll');
+        } else {
+            document.querySelector('.scroller').classList.remove('no-scroll');
+        }
+        if (id === 'shop') this.loadShop();
+        if (id === 'quest') this.loadQuests(true);
+    }
+
+    moveLine(b) {
+        if (b) this.el.magic.style.transform = `translateY(${b.getBoundingClientRect().top - b.parentElement.getBoundingClientRect().top}px)`;
+    }
+
+    toggle(mini) {
+        if (mini) {
+            this.el.win.classList.add('mini');
+            setTimeout(() => {
+                this.el.win.style.display = 'none';
+                this.el.orb.style.display = 'flex';
+                setTimeout(() => { this.el.orb.style.transform = 'scale(1)'; }, 50);
+            }, 300);
+        } else {
+            this.el.orb.style.transform = 'scale(0) rotate(180deg)';
+            this.el.win.style.display = 'flex';
+            void this.el.win.offsetWidth;
+            setTimeout(() => this.el.win.classList.remove('mini'), 100);
+        }
+    }
 }
- 
+
+const preLoader = new functions();
+preLoader.installInterceptors();
+
+if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', () => new DuoRain().init());
+else new DuoRain().init();
+
 })();
